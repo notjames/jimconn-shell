@@ -1,0 +1,8 @@
+*.priv
+prepare_workload
+temp/*
+coverage.*
+.vscode/**
+**/debug
+**.sw*
+.DS_Store**
