@@ -55,15 +55,15 @@ setup_cluster_env()
       echo "Cluster path found: $CLUSTER_NAME. Exports set. Alias for kssh created."
   else
     [[ -z $INITIAL_CLUSTER_SETUP ]] && \
-      echo >&2 "No kraken cluster found. Skipping env setup. Run 'setup_cluster_env' when one is up"
+      echo >&2 "No kraken clusters found. Skipping env setup. Run 'skopos' when one is up"
   fi
 
   [[ -z $INITIAL_CLUSTER_SETUP ]] && export INITIAL_CLUSTER_SETUP=1
 }
 
-function krswitch
+function skopos_switch
 {
-  [[ -n "$1" ]] && new_cfg_loc="$1" || \
+  [[ -n "$1" ]] && local new_cfg_loc="$1" || \
     {
       echo "switch requires valid environment name"
       return 70
@@ -88,8 +88,28 @@ function krswitch
   fi
 }
 
-function krlist
+function skopos_init
 {
+   [[ -n "$1" ]] && local new_cfg_loc="$1" || \
+    {
+      echo "'init' requires valid new environment name"
+      return 70
+    }
+
+    if mv $KRAKEN $KRAKEN-$new_cfg_loc >/dev/null
+    then
+      skopos_switch $new_cfg_loc
+    fi
+}
+
+function skopos_list
+{
+  if [[ ! -L $KRAKEN ]]
+  then
+    echo >&2 "Skopos doesn't seem to be set up. Please run 'skopos init'"
+    return 10
+  fi
+
   echo -e "\nThe following kraken environment(s) exist..."
 
   for d in "$KRAKEN-"* 
@@ -111,7 +131,13 @@ function krlist
 function skopos_usage
 {
   echo """
-  Usage: skopos [list] [switch <name>] [help]
+  Usage: skopos [init <name>] [list] [switch <name>] [help]
+
+  init     : Initialize new skropos env.
+  list     : List all kraken environments available.
+  switch   : Switch to kraken environment.
+  help     : This message.
+
   """
 }
 
@@ -131,12 +157,12 @@ function skopos
         list) 
           shift
           set -- "$@"
-          krlist $@
+          skopos_list $@
         ;;
         switch)
           shift
           set -- "$@"
-          krswitch $@
+          skopos_switch $@
           break
         ;;
         help|-h|--help)
@@ -144,6 +170,12 @@ function skopos
           skopos_usage
           break
         ;;
+	init)
+	  shift
+          set -- "$@"
+	  skopos_init $@
+          break
+	;;
         *)
           echo >&2 "Invalid option: '$1'"
           shift
