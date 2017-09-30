@@ -1,0 +1,212 @@
+#!/bin/bash
+
+kraken_env()
+{
+  KRAKEN=${HOME}/.kraken       # This is the default output directory for Kraken
+  SSH_ROOT=${HOME}/.ssh
+  AWS_ROOT=${HOME}/.aws
+  AWS_CONFIG=${AWS_ROOT}/config  # Use these files when using the aws provider
+  AWS_CREDENTIALS=${AWS_ROOT}/credentials
+  SSH_KEY=${SSH_ROOT}/id_rsa   # This is the default rsa key configured
+  SSH_PUB=${SSH_ROOT}/id_rsa.pub
+  K2OPTS="-v ${KRAKEN}:${KRAKEN}
+	  -v ${SSH_ROOT}:${SSH_ROOT}
+	  -v ${AWS_ROOT}:${AWS_ROOT}
+	  -e HOME=${HOME}
+	  --rm=true
+	  -it"
+
+  export KRAKEN SSH_ROOT AWS_ROOT AWS_CONFIG AWS_CREDENTIALS \
+	 SSH_KEY SSH_PUB K2OPTS 
+}
+
+cluster_path()
+{
+  if [[ -d "$KRAKEN" || -s "$KRAKEN" ]]
+  then
+    export CLUSTER_NAME=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \)) 2>/dev/null)
+  else
+    echo >&2 'Sorry. There does not seem to be a proper .kraken environment IE ~/.kraken'
+    return 50
+  fi
+}
+
+setup_cluster_env()
+{
+  kraken_env
+
+  if [[ $? == 0 ]]
+  then
+    cluster_path && \
+    KUBECONFIG=$KRAKEN/$CLUSTER_NAME/admin.kubeconfig && \
+    HELM_HOME=$KRAKEN/$CLUSTER_NAME/.helm && \
+    export CLUSTER_NAME KUBECONFIG HELM_HOME 
+
+    alias k='kubectl'
+    alias kg='kubectl get -o wide'
+    alias k2="kubectl --kubeconfig=$KUBECONFIG"
+    alias k2g="k2 get -o wide"
+    alias kssh="ssh -F $KRAKEN/$CLUSTER_NAME/ssh_config " 
+
+    [[ -z $INITIAL_CLUSTER_SETUP ]] && \
+      echo "Cluster path found: $CLUSTER_NAME. Exports set. Alias for kssh created."
+  else
+    [[ -z $INITIAL_CLUSTER_SETUP ]] && \
+      echo >&2 "No kraken clusters found. Skipping env setup. Run 'skopos' when one is up"
+  fi
+
+  [[ -z $INITIAL_CLUSTER_SETUP ]] && export INITIAL_CLUSTER_SETUP=1
+}
+
+skopos_switch()
+{
+  [[ -n "$1" ]] && local new_cfg_loc="$1" || \
+    {
+      echo "switch requires valid environment name"
+      return 70
+    }
+
+  new_base=$(dirname $KRAKEN)/.kraken-$new_cfg_loc
+
+  if [[ -d "$new_base" ]]
+  then
+    if ln -vnsf "$new_base" "$KRAKEN"
+    then
+      unset INITIAL_CLUSTER_SETUP
+      setup_cluster_env
+    else
+      xc=$?
+      echo >&2 "Unable to switch config to '$1': ln exit code: $xc"
+      return $xc
+    fi
+  else
+    echo >&2 "the environment '$new_cfg_loc' does not exist"
+    return 9
+  fi
+}
+
+skopos_create_env()
+{
+  [[ -n "$1" ]] && local new_cfg_loc="$1" || \
+    {
+      echo "switch requires valid environment name"
+      return 70
+    }
+
+  new_base=$KRAKEN-$new_cfg_loc
+
+  if mkdir $new_base
+  then
+    skopos_switch $new_cfg_loc
+    echo "Created $new_base and switched to it. You're all set."
+  fi
+}
+
+skopos_init()
+{
+   [[ -n "$1" ]] && local new_cfg_loc="$1" || \
+    {
+      echo "'init' requires valid new environment name"
+      return 70
+    }
+
+    if mv $KRAKEN $KRAKEN-$new_cfg_loc >/dev/null
+    then
+      skopos_switch $new_cfg_loc
+    fi
+}
+
+skopos_list()
+{
+  if [[ ! -L $KRAKEN ]]
+  then
+    echo >&2 "Skopos doesn't seem to be set up. Please run 'skopos init'"
+    return 10
+  fi
+
+  echo -e "\nThe following kraken environment(s) exist..."
+
+  for d in "$KRAKEN-"* 
+  do
+    d=${d#*-*}
+
+    if  [[ $(realpath "$KRAKEN") == *$d ]]
+    then
+      echo -n ' *  '
+      echo $d
+    else
+      echo -n '    '
+      echo $d
+    fi
+  done
+  echo
+}
+
+skopos_usage()
+{
+  echo """
+  Usage: skopos [init <name>] [list] [switch <name>] [help]
+
+  create   : Creates a new skopos env and switches to it.
+  init     : Initialize new skopos env.
+  list     : List all kraken environments available.
+  switch   : Switch to kraken environment.
+  help     : This message.
+
+"""
+}
+
+# http://www.biblestudytools.com/lexicons/greek/nas/skopos.html
+## This is the main function
+skopos()
+{
+  setup_cluster_env
+
+  if [[ -n "$KRAKEN" ]]
+  then
+    [[ -z "$1" ]] && skopos_usage && return 0
+
+    while [[ $1 ]]
+    do
+      case $1 in
+	list) 
+	  shift
+	  set -- "$@"
+	  skopos_list $@
+	;;
+	switch)
+	  shift
+	  set -- "$@"
+	  skopos_switch $@
+	  break
+	;;
+	help|-h|--help)
+	  shift
+	  skopos_usage
+	  break
+	;;
+	init)
+	  shift
+	  set -- "$@"
+	  skopos_init $@
+	  break
+	;;
+	create)
+	  shift
+	  set -- "$@"
+	  skopos_create_env $@
+	  break
+	;;
+	*)
+	  echo >&2 "Invalid option: '$1'"
+	  shift
+	  skopos_usage
+	  return 5
+	;;
+      esac
+    done
+  else
+    echo >&2 "Unable to continue. \$KRAKEN is not set."
+    return 100
+  fi
+}
