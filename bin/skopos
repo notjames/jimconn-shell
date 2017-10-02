@@ -24,7 +24,16 @@ cluster_path()
 {
   if [[ -d "$KRAKEN" || -s "$KRAKEN" ]]
   then
-    export CLUSTER_NAME=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \)) 2>/dev/null)
+    cluster_cfg=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \) -name 'config.yaml') 2>/dev/null)
+    clname=$(< $KRAKEN/config.yaml yaml2json - | jq '.deployment.clusters[0].name')
+
+    if [[ -n "$clname" && "$clname" != "null" ]]
+    then
+      export CLUSTER_NAME="$clname"
+    else
+      export CLUSTER_NAME="EDIT $KRAKEN/config.yaml"
+      echo >&2 "Have you edited in $KRAKEN/config.yaml yet? This env is not valid yet."
+    fi
   else
     echo >&2 'Sorry. There does not seem to be a proper .kraken environment IE ~/.kraken'
     return 50
@@ -178,14 +187,23 @@ skopos_usage()
 ## This is the main function
 skopos()
 {
+  local prereqs="skopos yaml2json jq"
+
+  for pr in $prereqs
+  do
+    if ! which $pr >/dev/null 2>&1
+    then
+      echo 2>& "Pre-requisite '$pr' is not found on system or in \$PATH"
+      return 60
+    fi
+  done
+
   if which kraken > /dev/null 2>&1
   then
     setup_cluster_env
 
     if [[ -n "$KRAKEN" ]]
     then
-      [[ -z "$1" ]] && skopos_usage && return 0
-
       while [[ $1 ]]
       do
         case $1 in
