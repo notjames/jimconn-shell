@@ -127,7 +127,7 @@ if [ -f '/var/tmp/google-cloud-sdk/path.bash.inc' ]; then source '/var/tmp/googl
 # The next line enables shell command completion for gcloud.
 if [ -f '/var/tmp/google-cloud-sdk/completion.bash.inc' ]; then source '/var/tmp/google-cloud-sdk/completion.bash.inc'; fi
 
-if [[ -x $HOME/bin/skopos ]]
+if [[ -e $HOME/bin/skopos ]]
 then
   source $HOME/bin/skopos
   setup_cluster_env

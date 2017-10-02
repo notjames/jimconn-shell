@@ -25,7 +25,7 @@ cluster_path()
   if [[ -d "$KRAKEN" || -s "$KRAKEN" ]]
   then
     cluster_cfg=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \) -name 'config.yaml') 2>/dev/null)
-    clname=$(< $KRAKEN/config.yaml yaml2json - | jq '.deployment.clusters[0].name')
+    clname=$(< $KRAKEN/config.yaml yaml2json - | jq -rc '.deployment.clusters[0].name')
 
     if [[ -n "$clname" && "$clname" != "null" ]]
     then
