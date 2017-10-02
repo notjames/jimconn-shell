@@ -2,8 +2,6 @@
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
 
-[[ -x $HOME/bin/skopos ]] && source $HOME/bin/skopos
-
 function cwb
 {
   git branch | grep -P '^\*' | grep -Po '\w+'
@@ -129,5 +127,9 @@ if [ -f '/var/tmp/google-cloud-sdk/path.bash.inc' ]; then source '/var/tmp/googl
 # The next line enables shell command completion for gcloud.
 if [ -f '/var/tmp/google-cloud-sdk/completion.bash.inc' ]; then source '/var/tmp/google-cloud-sdk/completion.bash.inc'; fi
 
-setup_cluster_env
+if [[ -x $HOME/bin/skopos ]]
+then
+  source $HOME/bin/skopos
+  setup_cluster_env
+fi
 

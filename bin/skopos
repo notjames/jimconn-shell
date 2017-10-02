@@ -70,14 +70,25 @@ skopos_switch()
 
   if [[ -d "$new_base" ]]
   then
-    if ln -vnsf "$new_base" "$KRAKEN"
+    if [[ -L $KRAKEN ]]
     then
-      unset INITIAL_CLUSTER_SETUP
-      setup_cluster_env
+      if rm $KRAKEN 2>/dev/null
+      then
+        if ln -vsf "$new_base" "$KRAKEN"
+        then
+          unset INITIAL_CLUSTER_SETUP
+        else
+          xc=$?
+          echo >&2 "Unable to switch config to '$1': ln exit code: $xc"
+          return $xc
+        fi
+      else
+        echo >&2 "Unable to remote old symlink '$KRAKEN', so giving up. Ret code for rm was: $?"
+        return 8
+      fi
     else
-      xc=$?
-      echo >&2 "Unable to switch config to '$1': ln exit code: $xc"
-      return $xc
+      echo >&2 "Will not continue. Your kraken env: '$KRAKEN' is not a symlink."
+      return 7
     fi
   else
     echo >&2 "the environment '$new_cfg_loc' does not exist"
@@ -97,8 +108,13 @@ skopos_create_env()
 
   if mkdir $new_base
   then
-    skopos_switch $new_cfg_loc
-    echo "Created $new_base and switched to it. You're all set."
+    if skopos_switch $new_cfg_loc
+    then
+      kraken generate
+      echo "Created $new_base and switched to it. You're all set."
+    else
+      echo >&2 "Unable to create '$new_base': exit code was $?"
+    fi
   fi
 }
 
@@ -121,16 +137,18 @@ skopos_list()
   if [[ ! -L $KRAKEN ]]
   then
     echo >&2 "Skopos doesn't seem to be set up. Please run 'skopos init'"
+    skopos_usage
     return 10
   fi
 
   echo -e "\nThe following kraken environment(s) exist..."
+  echo -e  "(currently select environment is marked with a '*')\n"
 
   for d in "$KRAKEN-"* 
   do
     d=${d#*-*}
 
-    if  [[ $(realpath "$KRAKEN") == *$d ]]
+    if  [[ $(realpath "$KRAKEN") == *.kraken-$d ]]
     then
       echo -n ' *  '
       echo $d
@@ -160,53 +178,61 @@ skopos_usage()
 ## This is the main function
 skopos()
 {
-  setup_cluster_env
-
-  if [[ -n "$KRAKEN" ]]
+  if which kraken > /dev/null 2>&1
   then
-    [[ -z "$1" ]] && skopos_usage && return 0
+    setup_cluster_env
 
-    while [[ $1 ]]
-    do
-      case $1 in
-	list) 
-	  shift
-	  set -- "$@"
-	  skopos_list $@
-	;;
-	switch)
-	  shift
-	  set -- "$@"
-	  skopos_switch $@
-	  break
-	;;
-	help|-h|--help)
-	  shift
-	  skopos_usage
-	  break
-	;;
-	init)
-	  shift
-	  set -- "$@"
-	  skopos_init $@
-	  break
-	;;
-	create)
-	  shift
-	  set -- "$@"
-	  skopos_create_env $@
-	  break
-	;;
-	*)
-	  echo >&2 "Invalid option: '$1'"
-	  shift
-	  skopos_usage
-	  return 5
-	;;
-      esac
-    done
+    if [[ -n "$KRAKEN" ]]
+    then
+      [[ -z "$1" ]] && skopos_usage && return 0
+
+      while [[ $1 ]]
+      do
+        case $1 in
+          list) 
+            shift
+            set -- "$@"
+            skopos_list $@
+          ;;
+          switch)
+            shift
+            set -- "$@"
+            skopos_switch $@
+            setup_cluster_env
+            break
+          ;;
+          help|-h|--help)
+            shift
+            skopos_usage
+            break
+          ;;
+          init)
+            shift
+            set -- "$@"
+            skopos_init $@
+            setup_cluster_env
+            break
+          ;;
+          create)
+            shift
+            set -- "$@"
+            skopos_create_env $@
+            setup_cluster_env
+            break
+          ;;
+          *)
+            echo >&2 "Invalid option: '$1'"
+            shift
+            skopos_usage
+            return 5
+          ;;
+        esac
+      done
+    else
+      echo >&2 'Unable to continue. $KRAKEN is not set.'
+      return 100
+    fi
   else
-    echo >&2 "Unable to continue. \$KRAKEN is not set."
-    return 100
+    echo >&2 'Kraken must be installed and in our $PATH'
   fi
 }
