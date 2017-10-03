@@ -24,14 +24,15 @@ cluster_path()
 {
   if [[ -d "$KRAKEN" || -s "$KRAKEN" ]]
   then
-    cluster_cfg=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \) -name 'config.yaml') 2>/dev/null)
+    #cluster_cfg=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \)) 2>/dev/null)
+# only bad thing about this is that it relies on the name of the config to be "config.yaml"
+# hmmmm.
     clname=$(< $KRAKEN/config.yaml yaml2json - | jq -rc '.deployment.clusters[0].name')
 
-    if [[ -n "$clname" && "$clname" != "null" ]]
+    export CLUSTER_NAME="$clname"
+
+    if [[ -z "$CLUSTER_NAME" || "$clname" == "null" ]]
     then
-      export CLUSTER_NAME="$clname"
-    else
-      export CLUSTER_NAME="EDIT $KRAKEN/config.yaml"
       echo >&2 "Have you edited in $KRAKEN/config.yaml yet? This env is not valid yet."
     fi
   else
@@ -43,6 +44,8 @@ cluster_path()
 setup_cluster_env()
 {
   kraken_env
+
+  [[ -d $HOME/.helm ]] && GLOBAL_HELM=$HOME/.helm
 
   if [[ $? == 0 ]]
   then
@@ -56,6 +59,13 @@ setup_cluster_env()
     alias k2="kubectl --kubeconfig=$KUBECONFIG"
     alias k2g="k2 get -o wide"
     alias kssh="ssh -F $KRAKEN/$CLUSTER_NAME/ssh_config " 
+
+    if [[ -n "$GLOBAL_HELM" && ! -d $KRAKEN/.helm ]]
+    then
+#      echo -e "\nLinking $KRAKEN/.helm to $HOME/.helm"
+#      echo -e "If this is undesirable, run 'rm \$KRAKEN/.helm'\n"
+      ln -sf $GLOBAL_HELM $KRAKEN
+    fi
 
     [[ -z $INITIAL_CLUSTER_SETUP ]] && \
       echo "Cluster path found: $CLUSTER_NAME. Exports set. Alias for kssh created."
@@ -120,6 +130,18 @@ skopos_create_env()
     if skopos_switch $new_cfg_loc
     then
       kraken generate
+
+## I liked the way the following works but it's too complicated
+## and it rewrites the structure of the config.yaml in such a way
+## that it's less manageable.
+#      < $KRAKEN/config.yaml yaml2json - | \
+#        jq -rcM --arg "newenv" $new_cfg_loc '. | .deployment.clusters[0].name = "$newenv"' | \
+#        json2yaml - > $KRAKEN/skopos-$new_cfg_loc.yaml
+##
+## So we'll just do it this way.
+
+      sed -ri 's/(^\ +- name:)$/\1 '$new_cfg_loc'/' $KRAKEN/config.yaml
+
       echo "Created $new_base and switched to it. You're all set."
     else
       echo >&2 "Unable to create '$new_base': exit code was $?"
@@ -169,16 +191,62 @@ skopos_list()
   echo
 }
 
+skopos_rm()
+{
+  local env_to_rm=$1
+
+  if [[ -z "$env_to_rm" ]]
+  then
+    echo >&2 "usage: skopos rm <envname>"
+    skopos_usage
+    return 20
+  fi
+
+
+
+  echo """
+  Skopos will not remove any environments as yet. That currently
+  is your responsibility so as not to accidentally remove an env
+  without explicit knowledge. To remove an environment one should
+  do the following:
+
+    # step 1
+    $ skopos list
+
+    ... find an environment other than the one you want to 
+        remove. If there are no other environments then skip to #4.
+
+    # step 2
+    $ skopos switch env_other_than_the_one_you_want_rm
+
+    # step 3
+    $ rm -rf \$KRAKEN-$env_to_rm
+
+    # step 4 -- skip this step if you ran step 3.
+    # If you are removing your only Kraken env, you're likely
+    # starting over from scratch or something, so you will
+    # likely want to remove everything. If you do this, you
+    # may be removing stuff you need if you've run this cluster.
+    # Run this at your own expense!
+    $ rm -rf \$KRAKEN
+
+    # Reset any env vars
+    unset KUBECONFIG HELM_HOME CLUSTER_NAME K2OPTS
+
+"""
+}
+
 skopos_usage()
 {
   echo """
   Usage: skopos [init <name>] [list] [switch <name>] [help]
 
-  create   : Creates a new skopos env and switches to it.
-  init     : Initialize new skopos env.
-  list     : List all kraken environments available.
-  switch   : Switch to kraken environment.
-  help     : This message.
+  c|create     : Creates a new skopos env and switches to it.
+  i|init       : Initialize new skopos env.
+  l|ls|list    : List all kraken environments available.
+  s|sw|switch  : Switch to kraken environment.
+  r|rm|remove  : Explains how to remove an environment.
+  h|help       : This message.
 
 """
 }
@@ -207,35 +275,41 @@ skopos()
       while [[ $1 ]]
       do
         case $1 in
-          list) 
+          list|l|ls)
             shift
             set -- "$@"
             skopos_list $@
           ;;
-          switch)
+          switch|s|sw)
             shift
             set -- "$@"
             skopos_switch $@
             setup_cluster_env
             break
           ;;
-          help|-h|--help)
+          help|h|-h|--help)
             shift
             skopos_usage
             break
           ;;
-          init)
+          init|i)
             shift
             set -- "$@"
             skopos_init $@
             setup_cluster_env
             break
           ;;
-          create)
+          create|c|cr)
             shift
             set -- "$@"
             skopos_create_env $@
             setup_cluster_env
+            break
+          ;;
+          delete|d|r|rm|del)
+            shift
+            set -- "$@"
+            skopos_rm  $@
             break
           ;;
           *)
