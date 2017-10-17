@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'yaml'
+
+json = ARGV.first or raise ArgumentError, "Please specify a json file to parse."
+
+begin
+  if json == '-'
+    jdata = ARGF.read.chomp
+
+    puts  YAML.dump(JSON.load(jdata))
+  else
+    puts  YAML.dump(JSON.load(File.read(json).chomp))
+  end
+rescue => e
+  $stderr.puts 'Unable to comply: %s' % [e.message]
+end
+
