@@ -8,6 +8,26 @@
 # for ssh logins, install and configure the libpam-umask package.
 #umask 022
 
+# The next line updates PATH for the Google Cloud SDK.
+if [ -f '/var/tmp/google-cloud-sdk/path.bash.inc' ]
+then
+  source '/var/tmp/google-cloud-sdk/path.bash.inc'
+
+# The next line enables shell command completion for gcloud.
+  if [ -f '/var/tmp/google-cloud-sdk/completion.bash.inc' ]
+  then 
+    source '/var/tmp/google-cloud-sdk/completion.bash.inc'
+  fi
+fi
+
+[[ -z "$GOPATH" ]] && GOPATH=$HOME/go 
+PATH=$PATH:$GOPATH/bin
+
+# set PATH so it includes user's private bin if it exists
+if [ -d "$HOME/bin" ] ; then
+    PATH="$HOME/bin:$PATH"
+fi
+
 # if running bash
 if [ -n "$BASH_VERSION" ]; then
     # include .bashrc if it exists
@@ -16,13 +36,19 @@ if [ -n "$BASH_VERSION" ]; then
     fi
 fi
 
-# set PATH so it includes user's private bin if it exists
-if [ -d "$HOME/bin" ] ; then
-    PATH="$HOME/bin:$PATH"
-fi
-
 [[ -x /usr/bin/vim ]] && export EDITOR=/usr/bin/vim
 
-export GITAWAREPROMPT="$HOME/.bash/git-aware-prompt" PATH
+
+export GITAWAREPROMPT="$HOME/.bash/git-aware-prompt" PATH GOPATH
 source "${GITAWAREPROMPT}/main.sh"
+
+# Begin Kraken env functions
+# install_skopos
+if [[ -e $HOME/bin/skopos ]]
+then
+  echo "Setting up kraken environment"
+  source $HOME/bin/skopos
+  alias sk="skopos"
+  setup_cluster_env
+fi
 

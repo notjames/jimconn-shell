@@ -19,10 +19,12 @@ if [ -x /usr/bin/dircolors ]; then
     alias egrep='egrep --color=auto'
 fi
 
-#alias gcloud='gcloud project=jimtest-170020'
+[ -x $(which git) ] && alias g='git'
+
 alias tmux='tmux -2'
 
 gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-f
+#alias gcloud='gcloud project=jimtest-170020'
 alias gcloud='gcloud --project=k8s-work'
 
 alias vi='vi -p'

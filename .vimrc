@@ -61,5 +61,5 @@ let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
 
 "autocmd BufNewFile,BufRead *.go setlocal et ts=4 sw=4 
-set sts=4 ts=8 sw=2 ai nu ruler si sta sm hls
+set sts=4 ts=8 sw=2 ai nu ruler si sta sm hls et
 highlight search ctermfg=white ctermbg=blue
