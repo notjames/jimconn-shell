@@ -1,0 +1,66 @@
+#
+# .screenrc
+#
+defescape ^oo
+escape ^oo
+
+autodetach on
+
+startup_message off
+
+defhstatus "^E{+b c}#^En/^Et  ^EH  load: ^El  time: ^EC ^EM/^Ed/^EY"
+#hardstatus on
+#hardstatus alwayslastline
+hardstatus alwayslastline "%{rk}%H %{gk}%c %{yk}%M%d | %{rk} Load: %l %{wk} | %{wk}%?%-Lw%?%{bw}%n*%f %t%?(%u)%?%{wk}%?%+Lw%?"
+
+#caption always "[%h]"
+#caption always "%{+b rk}%H%{gk} |%c %{yk}%d.%m.%Y | %{+b rk}%n%f %t %{bk} | %?%-Lw%?%{bw}%n*%f %t%?(%u)%?%{wk}%?%+Lw%? | %{rk} Load: %l %{wk}"
+
+activity              "%C -> %n%f %t activity!"
+
+vbell off
+vbell_msg ""
+
+altscreen on
+
+defscrollback 9999
+
+nonblock on
+
+term linux
+
+# ==============================================================
+# BIND and the Services:
+# ==============================================================
+# remove some stupid / dangerous key bindings
+#  bind k
+#  bind ^k
+#  bind .
+#  bind ^\
+#  bind \\
+#  bind ^h
+#  bind h
+#  bind h  hardcopy
+  bind x
+# make them better
+  bind 'K' kill
+#  bind 'I' login on
+#  bind 'O' login off
+#  bind '}' history
+#  bind ' ' windows
+
+bindkey -k k4 split
+bindkey -k k5 remove
+bindkey -k k6 focus
+bindkey -k k7 prev
+bindkey -k k8 next
+bindkey -k k9 screen -t localhost
+
+screen -t jimconn
+screen -t jimconn
+screen -t jimconn
+screen -t jimconn
+screen -t LinuxVM ssh -X jimconn@linuxvm terminix
+#screen -t LinuxVM ssh jimconn@linuxvm
+#screen -t LinuxVM ssh jimconn@linuxvm
+#screen -t LinuxVM ssh jimconn@linuxvm
