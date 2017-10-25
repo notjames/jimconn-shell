@@ -124,18 +124,8 @@ if ! shopt -oq posix; then
     . /etc/bash_completion
   fi
 fi
-if [[ $TERMINIX_ID ]]; then source /etc/profile.d/vte.sh; fi # Ubuntu Budgie END
 
-
-# The next line updates PATH for the Google Cloud SDK.
-if [ -f '/var/tmp/google-cloud-sdk/path.bash.inc' ]; then source '/var/tmp/google-cloud-sdk/path.bash.inc'; fi
-
-# The next line enables shell command completion for gcloud.
-if [ -f '/var/tmp/google-cloud-sdk/completion.bash.inc' ]; then source '/var/tmp/google-cloud-sdk/completion.bash.inc'; fi
-
-if [[ -e $HOME/bin/skopos ]]
-then
-  source $HOME/bin/skopos
-  setup_cluster_env
-fi
-
+if [[ $TERMINIX_ID ]]
+then 
+  source /etc/profile.d/vte.sh
+fi # Ubuntu Budgie END
