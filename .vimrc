@@ -35,6 +35,9 @@ Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 "Plug '~/my-prototype-plugin'
 Plug 'tpope/vim-sensible'
 
+" display the indentation levels with thin vertical lines
+Plug 'Yggdroot/indentLine' 
+
 " syntastic goodness
 Plug 'vim-syntastic/syntastic'
 
@@ -49,17 +52,60 @@ call plug#end()
 " Tab navigation like Firefox.
 nnoremap <C-p> :tabprevious<CR>
 nnoremap <C-n> :tabnext<CR>
-nnoremap <C-T> :tabnew<CR>
+nnoremap <C-t> :tabnew<CR>
 
 "set statusline+=%#warningmsg#
 "set statusline+=%{SyntasticStatuslineFlag()}
 "set statusline+=%*
 "
 let g:syntastic_always_populate_loc_list = 1
-let g:syntastic_auto_loc_list = 1
+let g:syntastic_auto_loc_list = 0
 let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
+let g:syntastic_loc_list_height=3
+let b:syntastic_sh_shellcheck_args = "--exclude SC2016,SC1090"
+
+
+let g:indentLine_setColors = 1
+let g:indentLine_char = "|"
+
+set statusline+=%#warningmsg#
+set statusline+=%{SyntasticStatuslineFlag()}
+set statusline+=%*
+
+nnoremap <C-e> :Errors<CR>
+nnoremap <C-u> :lclose<CR>
+nnoremap <C-y> :lnext<CR>
+nnoremap <C-w> :lprevious<CR>
 
 "autocmd BufNewFile,BufRead *.go setlocal et ts=4 sw=4 
 set sts=4 ts=8 sw=2 ai nu ruler si sta sm hls et
-highlight search ctermfg=white ctermbg=blue
+
+"highlight search term=bold,italic ctermfg=black ctermbg=blue
+highlight Search term=bold,italic cterm=bold,italic ctermfg=white ctermbg=blue guifg=white guibg=blue
+:command! -nargs=1 -range SuperRetab <line1>,<line2>s/\v%(^ *)@<= {<args>}/\t/g
+
+" $NVIM_TUI_ENABLE_CURSOR_SHAPE = 1
+" found: https://github.com/neovim/neovim/issues/2475
+" pipe      \<Esc>[5 q
+" underline \<Esc>[4 q
+" block     \<Esc>[3 q
+" insert mode:  &t_SI
+" replace mode: &t_SR
+" common:       &t_EI
+"
+" insert mode - pipe 
+let &t_SI .= "\<Esc>[5 q"
+
+" replace mode - block
+let &t_SR .= "\<Esc>[3 q"
+
+" common - block
+let &t_EI .= "\<Esc>[3 q"
+
+if has('nvim-0.1.5')        " True color in neovim wasn't added until 0.1.5
+  set termguicolors
+endif
+
+colo koehler
+set list lcs=tab:\|\

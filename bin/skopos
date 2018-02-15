@@ -20,16 +20,28 @@ kraken_env()
 	 SSH_KEY SSH_PUB K2OPTS 
 }
 
+cluster_name()
+{
+# only bad thing about this is that it relies on the name of the config to be "config.yaml"
+# hmmmm.
+  clname=$(< $KRAKEN/config.yaml yaml2json - | jq -rc '.deployment.clusters[0].name')
+
+  if [[ $clname == "null" ]]
+  then
+    # try this for commontools cluster:
+    clname=$(< $KRAKEN/config.yaml yaml2json - | jq -rc '.deployment.cluster')
+  fi
+
+  echo $clname
+}
+
 cluster_path()
 {
   if [[ -d "$KRAKEN" || -s "$KRAKEN" ]]
   then
-    #cluster_cfg=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \)) 2>/dev/null)
-# only bad thing about this is that it relies on the name of the config to be "config.yaml"
-# hmmmm.
-    clname=$(< $KRAKEN/config.yaml yaml2json - | jq -rc '.deployment.clusters[0].name')
+    #cluster_cfg=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \) -name 'admin.kubeconfig') 2>/dev/null)
 
-    export CLUSTER_NAME="$clname"
+    export CLUSTER_NAME="$(cluster_name)"
 
     if [[ -z "$CLUSTER_NAME" || "$clname" == "null" ]]
     then
@@ -51,20 +63,37 @@ setup_cluster_env()
   then
     cluster_path && \
     KUBECONFIG=$KRAKEN/$CLUSTER_NAME/admin.kubeconfig && \
-    HELM_HOME=$KRAKEN/$CLUSTER_NAME/.helm && \
+    HELM_HOME=$KRAKEN/.helm && \
     export CLUSTER_NAME KUBECONFIG HELM_HOME 
 
     alias k='kubectl'
     alias kg='kubectl get -o wide'
     alias k2="kubectl --kubeconfig=$KUBECONFIG"
-    alias k2g="k2 get -o wide"
+    alias k2g="kubectl --kubeconfig=$KUBECONFIG get -o wide"
+    alias k2ga="kubectl --kubeconfig=$KUBECONFIG get -o wide --all-namespaces"
     alias kssh="ssh -F $KRAKEN/$CLUSTER_NAME/ssh_config " 
 
-    if [[ -n "$GLOBAL_HELM" && ! -d $KRAKEN/.helm ]]
+    if [[ -d $KRAKEN ]]
     then
-#      echo -e "\nLinking $KRAKEN/.helm to $HOME/.helm"
-#      echo -e "If this is undesirable, run 'rm \$KRAKEN/.helm'\n"
-      ln -sf $GLOBAL_HELM $KRAKEN
+      if [[ -n "$GLOBAL_HELM" && ! -d $KRAKEN/.helm ]]
+      then
+  #      echo -e "\nLinking $KRAKEN/.helm to $HOME/.helm"
+  #      echo -e "If this is undesirable, run 'rm \$KRAKEN/.helm'\n"
+        ln -sf $GLOBAL_HELM $KRAKEN/
+      else
+        if mv $KRAKEN/.helm $KRAKEN/dot.helm 2>/dev/null
+        then
+          if ! ln -sf $GLOBAL_HELM $KRAKEN/
+          then
+            echo >&2 "Unable to link global .helm to cluster space. mv error code was $?"
+          fi
+        else
+          echo >&2 """
+          Your cluster space already has a .helm in it and it could not be moved.
+          mv error code was $?
+          """
+        fi
+      fi
     fi
 
     [[ -z $INITIAL_CLUSTER_SETUP ]] && \
@@ -117,19 +146,33 @@ skopos_switch()
 
 skopos_create_env()
 {
-  [[ -n "$1" ]] && local new_cfg_loc="$1" || \
-    {
-      echo "switch requires valid environment name"
-      return 70
-    }
-
-  new_base=$KRAKEN-$new_cfg_loc
-
-  if mkdir $new_base
+  if [[ -n "$1" ]]
   then
-    if skopos_switch $new_cfg_loc
+    local new_cfg_loc="$1"
+    new_base=$KRAKEN-$new_cfg_loc
+    shift 2
+  else
+    echo "switch requires valid environment name"
+    return 70
+  fi
+
+  # OK. Now pass arguments from user on to kraken
+  set -- "$@"
+
+  if [[ ! -d $new_base ]]
+  then
+    if mkdir -p $new_base
     then
-      kraken generate
+      echo "Directory: $new_base created successfully"
+    else
+      echo >&2 "Unable to create '$new_base': exit code was $?"
+      return 91
+    fi
+  fi
+
+  if skopos_switch $new_cfg_loc
+  then
+    kraken generate $@
 
 ## I liked the way the following works but it's too complicated
 ## and it rewrites the structure of the config.yaml in such a way
@@ -140,11 +183,9 @@ skopos_create_env()
 ##
 ## So we'll just do it this way.
 
-      sed -ri 's/(^\ +- name:)$/\1 '$new_cfg_loc'/' $KRAKEN/config.yaml
-
-      echo "Created $new_base and switched to it. You're all set."
-    else
-      echo >&2 "Unable to create '$new_base': exit code was $?"
+    if sed -ri 's/(^\ +- name:)$/\1 '$new_cfg_loc'/' $KRAKEN/config.yaml
+    then
+      echo "Updated config.yaml with your cluster name: '$new_cfg_loc'"
     fi
   fi
 }
@@ -179,14 +220,9 @@ skopos_list()
   do
     d=${d#*-*}
 
-    if  [[ $(realpath "$KRAKEN") == *.kraken-$d ]]
-    then
-      echo -n ' *  '
-      echo $d
-    else
-      echo -n '    '
-      echo $d
-    fi
+    [[ $(realpath "$KRAKEN") == *.kraken-$d ]] && \
+      echo ' *  '"$d"                          || \
+      echo '    '"$d"
   done
   echo
 }
@@ -233,6 +269,12 @@ skopos_rm()
     # Reset any env vars
     unset KUBECONFIG HELM_HOME CLUSTER_NAME K2OPTS
 
+    tl;dr
+
+    copy and paste the following after running 'skopos sw <some_other_cluser>':
+
+    rm -rf \$KRAKEN-$env_to_rm && unset KUBECONFIG HELM_HOME CLUSTER_NAME K2OPTS
+
 """
 }
 
@@ -240,7 +282,7 @@ skopos_usage()
 {
   echo """
   Usage: skopos [init <name>] [list] [switch <name>] 
-                [create <name>] [remove <name>] [help]
+                [create <name> [-- kraken args]] [remove <name>] [help]
 
   c|create     : Creates a new skopos env and switches to it.
   i|init       : Initialize new skopos env.
@@ -249,14 +291,24 @@ skopos_usage()
   r|rm|remove  : Explains how to remove an environment.
   h|help       : This message.
 
+  IMPORTANT NOTE:
+
+  The create argument will pass along all additional arguments
+  to kraken when arguments are separated by a '--' IE
+
+  kraken create foo-cluster -- --provider gke
+
+  will create a Kraken GKE cluster config in a newly created
+  'foo-cluster' path.
+
 """
 }
 
 # http://www.biblestudytools.com/lexicons/greek/nas/skopos.html
 ## This is the main function
-skopos()
+skopos_main()
 {
-  local prereqs="skopos yaml2json jq"
+  local prereqs="yaml2json jq ruby"
 
   for pr in $prereqs
   do
@@ -269,7 +321,7 @@ skopos()
 
   if which kraken > /dev/null 2>&1
   then
-    setup_cluster_env
+#    setup_cluster_env
 
     if [[ -n "$KRAKEN" ]]
     then
@@ -303,8 +355,11 @@ skopos()
           create|c|cr)
             shift
             set -- "$@"
+
             skopos_create_env $@
+
             setup_cluster_env
+            echo "Switched to $new_base. You're all set."
             break
           ;;
           delete|d|r|rm|del)

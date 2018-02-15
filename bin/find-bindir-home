@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+a="/$0"; 
+echo "$a"
+
+a=${a%/*}; 
+echo "$a"
+
+a=${a:-.}; 
+echo "$a"
+
+a=${a#/}/; 
+echo "$a"
+
+BASEDIR="$(cd "$a" || true; pwd)"
+
+echo "HOME: $HOME"
+echo "BASEDIR: $BASEDIR"
+
+minus="${BASEDIR//$HOME}"
+echo "minus is: $minus"
+
+# assume bin dir is off $HOME
+binhome="${minus/%\/bin*/}"
+
+[[ -z $binhome ]] && binhome=$HOME
+echo "binhome: $binhome"

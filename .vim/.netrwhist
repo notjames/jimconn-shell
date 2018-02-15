@@ -1,6 +1,5 @@
 let g:netrw_dirhistmax  =10
-let g:netrw_dirhist_cnt =4
-let g:netrw_dirhist_1='/Users/jimconn/exercism/go/hello-world'
-let g:netrw_dirhist_2='/Users/jimconn/go/src/jsonsvalidator/_containerize'
-let g:netrw_dirhist_3='/Users/jimconn/go/src/jsonsvalidator/jsv/test_configs'
-let g:netrw_dirhist_4='/Users/jimconn/go/src/jsonsvalidator/jsv/test_schemas'
+let g:netrw_dirhist_cnt =3
+let g:netrw_dirhist_1='/home/jimconn/projects/src/cyklops-config-vault/envs/staging'
+let g:netrw_dirhist_2='/home/jimconn/projects/src/cyklops-config-vault/envs/staging/chart-values'
+let g:netrw_dirhist_3='/home/jimconn/.config/nvim'
