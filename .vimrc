@@ -36,13 +36,29 @@ Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 Plug 'tpope/vim-sensible'
 
 " display the indentation levels with thin vertical lines
-Plug 'Yggdroot/indentLine' 
+Plug 'Yggdroot/indentLine'
 
 " syntastic goodness
 Plug 'vim-syntastic/syntastic'
 
+" pathogen
+Plug 'tpope/vim-pathogen'
+
+" Go stuff
+Plug 'fatih/vim-go'
+
 " Initialize plugin system
 call plug#end()
+set timeoutlen=1000 ttimeoutlen=10
+
+execute pathogen#infect()
+autocmd BufWritePre * :%s/\s\+$//e
+autocmd BufWritePre * :set et
+autocmd BufWritePre * :retab
+
+" tell vim to allow you to copy between files, remember your cursor
+" position and other little nice things like that
+set viminfo='100,\"2500,:200,%,n~/.viminfo
 
 "let g:rehash256 = 1
 "let g:molokai_original = 1
@@ -65,6 +81,17 @@ let g:syntastic_check_on_wq = 0
 let g:syntastic_loc_list_height=3
 let b:syntastic_sh_shellcheck_args = "--exclude SC2016,SC1090"
 
+" use goimports for formatting
+let g:go_fmt_command = "goimports"
+
+" turn highlighting on
+let g:go_highlight_functions = 1
+let g:go_highlight_methods = 1
+let g:go_highlight_structs = 1
+let g:go_highlight_operators = 1
+let g:go_highlight_build_constraints = 1
+
+let g:syntastic_go_checkers = ['go', 'golint', 'errcheck']
 
 let g:indentLine_setColors = 1
 let g:indentLine_char = "|"
@@ -78,7 +105,7 @@ nnoremap <C-u> :lclose<CR>
 nnoremap <C-y> :lnext<CR>
 nnoremap <C-w> :lprevious<CR>
 
-"autocmd BufNewFile,BufRead *.go setlocal et ts=4 sw=4 
+"autocmd BufNewFile,BufRead *.go setlocal et ts=4 sw=4
 set sts=4 ts=8 sw=2 ai nu ruler si sta sm hls et
 
 "highlight search term=bold,italic ctermfg=black ctermbg=blue
@@ -94,7 +121,7 @@ highlight Search term=bold,italic cterm=bold,italic ctermfg=white ctermbg=blue g
 " replace mode: &t_SR
 " common:       &t_EI
 "
-" insert mode - pipe 
+" insert mode - pipe
 let &t_SI .= "\<Esc>[5 q"
 
 " replace mode - block
