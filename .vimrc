@@ -55,9 +55,13 @@ call plug#end()
 set timeoutlen=1000 ttimeoutlen=10
 
 execute pathogen#infect()
+
 " -- for the following, use ~/.editorconfig now instead
+"  trim trailing whitespace
 " autocmd BufWritePre * :%s/\s\+$//e
+" always turn on expandtab
 " autocmd BufWritePre * :set et
+" always replace tab indents with spaces
 " autocmd BufWritePre * :retab
 
 " tell vim to allow you to copy between files, remember your cursor
@@ -139,4 +143,8 @@ if has('nvim-0.1.5')        " True color in neovim wasn't added until 0.1.5
 endif
 
 colo koehler
-set list lcs=tab:\|\
+
+" turn on indentation lines
+set conceallevel=1
+let g:indentLine_conceallevel=1
+set listchars=tab:\|\
