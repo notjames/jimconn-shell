@@ -47,14 +47,18 @@ Plug 'tpope/vim-pathogen'
 " Go stuff
 Plug 'fatih/vim-go'
 
+" editorconfig
+Plug 'editorconfig/editorconfig-vim'
+
 " Initialize plugin system
 call plug#end()
 set timeoutlen=1000 ttimeoutlen=10
 
 execute pathogen#infect()
-autocmd BufWritePre * :%s/\s\+$//e
-autocmd BufWritePre * :set et
-autocmd BufWritePre * :retab
+" -- for the following, use ~/.editorconfig now instead
+" autocmd BufWritePre * :%s/\s\+$//e
+" autocmd BufWritePre * :set et
+" autocmd BufWritePre * :retab
 
 " tell vim to allow you to copy between files, remember your cursor
 " position and other little nice things like that
