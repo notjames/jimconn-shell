@@ -26,14 +26,14 @@ yts()
   local d
   d=$HOME/Music
 
-  if [[ ! -d "$d" ]] 
+  if [[ ! -d "$d" ]]
   then
     mkdir "$d" ||       {
         echo >&2 "Unable to mkdir $d"
         return $?
       }
   fi
-    
+
   if cd "$d"
   then
     youtube-dl -kx --add-metadata --audio-format m4a -c -o "%(title)s-%(id)s.%(ext)s" "$*"
@@ -49,14 +49,14 @@ yt()
   local d
   d=$HOME/videos
 
-  if [[ ! -d "$d" ]] 
+  if [[ ! -d "$d" ]]
   then
     mkdir "$d" ||       {
         echo >&2 "Unable to mkdir $d"
         return $?
       }
   fi
-    
+
   if cd "$d"
   then
     youtube-dl --video-format mp4 --add-metadata -ct "$*"
@@ -107,4 +107,14 @@ alias grm='g co master && g fetch --all && g reset --hard upstream/master && g r
 
 eval "$(rbenv init -)"
 
+alias superior_sshconfig="$($HOME/bin/superior_sshconfig_update $HOME/.ssh/cyklops-superior $HOME/.kraken/cyklops-superior/ssh_config)"
 
+superior_sshconfig()
+{
+#  aws --region us-east-1 ec2 describe-instances \
+#      --query "Reservations[*].Instances[?contains(KeyName,'superior')].{PublicDnsName:PublicDnsName,PublicIpAddress:PublicIpAddress,PrivateDnsName:PrivateDnsName,PrivateIpAddress:PrivateIpAddress,Name: Tags[?Key == 'Name'].Value} | []" | \
+#  jq '[.[] | {PublicDnsName:.PublicDnsName,PublicIpAddress:.PublicIpAddress,PrivateDnsName:.PrivateDnsName,PrivateIpAddress:.PrivateIpAddress,Name:.Name[0]}]'
+#
+
+  # aws --region us-east-1 ec2 describe-instances --query "Reservations[*].Instances[?contains(KeyName,'superior')].{PublicDnsName:PublicDnsName,PublicIpAddress:PublicIpAddress,PrivateDnsName:PrivateDnsName,PrivateIpAddress:PrivateIpAddress,Name:Tags[?Key == 'Name'].Value} | []" | jq -r '.[] | @sh "PUBLIC_DNS=\(.PublicDnsName) PUBLIC_ADDRESS=\(.PublicIpAddress) PRIVATE_DNS=\(.PrivateDnsName) PRIVATE_ADDRESS=\(.PrivateIpAddress) NAME=\(.Name[0])"'
+}
