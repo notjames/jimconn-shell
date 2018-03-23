@@ -43,8 +43,9 @@ mv "$SSH_CONFIG" "$SSH_CONFIG~" 2>/dev/null
 
 while read -r vars
 do
-  vars=$(echo "$vars" | tr -d "'")
-  export $vars SHORT_NAME IDENTITY_FILE POOL
+  vars="$(echo "$vars" | tr -d "'")"
+  # shellcheck disable=SC2163
+  export "$vars" SHORT_NAME IDENTITY_FILE POOL
 
   [[ -z "${POOLCOUNT[$POOL]}" ]] && POOLCOUNT[$POOL]=0
 
