@@ -107,14 +107,4 @@ alias grm='g co master && g fetch --all && g reset --hard upstream/master && g r
 
 eval "$(rbenv init -)"
 
-alias superior_sshconfig="$($HOME/bin/superior_sshconfig_update $HOME/.ssh/cyklops-superior $HOME/.kraken/cyklops-superior/ssh_config)"
-
-superior_sshconfig()
-{
-#  aws --region us-east-1 ec2 describe-instances \
-#      --query "Reservations[*].Instances[?contains(KeyName,'superior')].{PublicDnsName:PublicDnsName,PublicIpAddress:PublicIpAddress,PrivateDnsName:PrivateDnsName,PrivateIpAddress:PrivateIpAddress,Name: Tags[?Key == 'Name'].Value} | []" | \
-#  jq '[.[] | {PublicDnsName:.PublicDnsName,PublicIpAddress:.PublicIpAddress,PrivateDnsName:.PrivateDnsName,PrivateIpAddress:.PrivateIpAddress,Name:.Name[0]}]'
-#
-
-  # aws --region us-east-1 ec2 describe-instances --query "Reservations[*].Instances[?contains(KeyName,'superior')].{PublicDnsName:PublicDnsName,PublicIpAddress:PublicIpAddress,PrivateDnsName:PrivateDnsName,PrivateIpAddress:PrivateIpAddress,Name:Tags[?Key == 'Name'].Value} | []" | jq -r '.[] | @sh "PUBLIC_DNS=\(.PublicDnsName) PUBLIC_ADDRESS=\(.PublicIpAddress) PRIVATE_DNS=\(.PrivateDnsName) PRIVATE_ADDRESS=\(.PrivateIpAddress) NAME=\(.Name[0])"'
-}
+alias superior_sshconfig='superior_sshconfig_update $HOME/.ssh/cyklops-superior $HOME/.kraken/cyklops-superior/ssh_config'
