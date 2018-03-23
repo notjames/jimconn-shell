@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# todo: add use of getops
+# add --template option to point to user-specified template
+
 usage()
 {
   echo >&2 """
@@ -19,7 +22,7 @@ get_each()
 
 declare -gA POOLCOUNT
 
-TMPL="$HOME/.ssh/ssh_config.tmpl"
+TMPL="./ssh_config.tmpl"
 IDENTITY_FILE=$1
 SSH_CONFIG=$2
 
@@ -29,14 +32,14 @@ SSH_CONFIG=$2
     exit 10
   }
 
-[[ -z "$SSH_CONFIG" || ! -d "$(dirname $SSH_CONFIG)" ]] && \
+[[ -z "$SSH_CONFIG" || ! -d "$(dirname "$SSH_CONFIG")" ]] && \
   {
     echo >&2 'Please specify the full path to the ssh config file you want to generate.'
     exit 11
   }
 
 # back up the file if it exists.
-mv $SSH_CONFIG $SSH_CONFIG~ 2>/dev/null
+mv "$SSH_CONFIG" "$SSH_CONFIG~" 2>/dev/null
 
 while read -r vars
 do
@@ -45,10 +48,10 @@ do
 
   [[ -z "${POOLCOUNT[$POOL]}" ]] && POOLCOUNT[$POOL]=0
 
-  let POOLCOUNT[$POOL]+=1
+  let POOLCOUNT["$POOL"]+=1
 
   SHORT_NAME="$(echo "$NAME" | cut -d _ -f 1)"
   POOL="$POOL-${POOLCOUNT[$POOL]}"
 
-  envsubst '$NAME $SHORT_NAME $PRIVATE_DNS $PRIVATE_ADDRESS $PUBLIC_DNS $PUBLIC_ADDRESS $IDENTITY_FILE $POOL' < $TMPL >> $SSH_CONFIG
+  envsubst '$NAME $SHORT_NAME $PRIVATE_DNS $PRIVATE_ADDRESS $PUBLIC_DNS $PUBLIC_ADDRESS $IDENTITY_FILE $POOL' < $TMPL >> "$SSH_CONFIG"
 done < <(get_each)
