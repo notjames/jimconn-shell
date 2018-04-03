@@ -31,8 +31,8 @@ get_each()
                  PublicIpAddress:PublicIpAddress,
                  PrivateDnsName:PrivateDnsName,
                  PrivateIpAddress:PrivateIpAddress,
-                 Name: Tags[?Key == \"Name\"].Value,
-                 NodePool: Tags[?Key == \"k2-nodepool\"].Value} | []" | \
+                 Name: Tags[?Key == 'Name'].Value,
+                 NodePool: Tags[?Key == 'k2-nodepool'].Value} | []" | \
   jq -r '.[] | @sh "PUBLIC_DNS=\(.PublicDnsName) PUBLIC_ADDRESS=\(.PublicIpAddress) PRIVATE_DNS=\(.PrivateDnsName) PRIVATE_ADDRESS=\(.PrivateIpAddress) NAME=\(.Name[0]) POOL=\(.NodePool[0])"'
 }
 
