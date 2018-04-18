@@ -59,8 +59,6 @@ shopt -s checkwinsize
 [ -x /usr/local/bin/ggrep ] && alias grep='/usr/local/bin/ggrep'
 [ -f ~/.acd_func.sh ] && source ~/.acd_func.sh
 
-export K8SCTX
-
 # make less more friendly for non-text input files, see lesspipe(1)
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
 
@@ -80,14 +78,14 @@ esac
 #force_color_prompt=yes
 
 if [ -n "$force_color_prompt" ]; then
-    if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
-	# We have color support; assume it's compliant with Ecma-48
-	# (ISO/IEC-6429). (Lack of such support is extremely rare, and such
-	# a case would tend to support setf rather than setaf.)
-	color_prompt=yes
-    else
-	color_prompt=
-    fi
+  if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
+    # We have color support; assume it's compliant with Ecma-48
+    # (ISO/IEC-6429). (Lack of such support is extremely rare, and such
+    # a case would tend to support setf rather than setaf.)
+    color_prompt=yes
+  else
+    color_prompt=
+  fi
 fi
 
 if [ "$color_prompt" = yes ]; then
@@ -151,3 +149,5 @@ else
 fi
 ## end installed_skopos
 
+export GITAWAREPROMPT="$HOME/.bash/git-aware-prompt" PATH GOPATH HISTTIMEFORMAT EDITOR
+source "${GITAWAREPROMPT}/main.sh"
