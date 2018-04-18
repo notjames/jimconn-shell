@@ -1,3 +1,4 @@
+# shellcheck disable=SC2148
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
@@ -10,13 +11,13 @@ function cwb
 function sm
 {
   CWB=$(cwb)
-  
+
   if [[ -n "$CWB" ]]
   then
     git checkout master && \
     git fetch upstream && \
     git reset --hard upstream/master && \
-    git checkout $CWB
+    git checkout "$CWB"
     git push
 
     if [ "$CWB" != "master" ]; then git merge master;fi
@@ -51,11 +52,14 @@ shopt -s checkwinsize
 # match all files and zero or more directories and subdirectories.
 #shopt -s globstar
 
+[ -x /usr/bin/kubectx ] && K8SCTX=$(kubectx | sed 's/_.*//')
 [ -x /usr/bin/vim ] && alias vi="/usr/bin/vim -p"
 [ -x /usr/local/bin/vimcat ] && alias cat='/usr/local/bin/vimcat -n --colors=256'
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 [ -x /usr/local/bin/ggrep ] && alias grep='/usr/local/bin/ggrep'
 [ -f ~/.acd_func.sh ] && source ~/.acd_func.sh
+
+export K8SCTX
 
 # make less more friendly for non-text input files, see lesspipe(1)
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
@@ -126,6 +130,24 @@ if ! shopt -oq posix; then
 fi
 
 if [[ $TERMINIX_ID ]]
-then 
+then
   source /etc/profile.d/vte.sh
 fi # Ubuntu Budgie END
+
+## installed_skopos
+BASH_SCRIPTS="$HOME"/.bash
+export BASH_SCRIPTS
+
+if [[ -e "$BASH_SCRIPTS"/skopos/init_skopos ]]; then
+  source "$BASH_SCRIPTS"/skopos/init_skopos
+
+  if [[ $(echo "$PATH" | grep -c "$HOME"/bin) == 0 ]]
+  then
+    PATH="${PATH:+$PATH:}$HOME/bin"
+    export PATH
+  fi
+else
+  echo >&2 "No skopos for you... :("
+fi
+## end installed_skopos
+
