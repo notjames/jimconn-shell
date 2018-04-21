@@ -22,10 +22,18 @@ find_git_dirty() {
 
 find_k8s_things()
 {
-  k8sctx=$(/usr/local/bin/kubectx | sed 's/_.*//')
-  #k8sns=$(kubens | cat -A - | grep -P '33m' | perl -lne '/\[\[33m(\w+)\^\[/;print $1')
+  k8sctx=''
 
-  k8sctx="(${k8sctx:=not set}$txtrst)"
+  k8sctx=$(/usr/local/bin/kubectx | sed 's/_.*//')
+
+  if [[ -z $k8sctx ]]
+  then
+    k8sctx="(Not set)"
+  else
+    k8sctx="($k8sctx$txtrst)"
+  fi
+
+  #k8sns=$(kubens | cat -A - | grep -P '33m' | perl -lne '/\[\[33m(\w+)\^\[/;print $1')
   #K8SNS="${K8SNS:-not set}"
 }
 
@@ -34,10 +42,8 @@ PROMPT_COMMAND="find_k8s_things; find_git_branch; find_git_dirty; $PROMPT_COMMAN
 # Default Git enabled prompt with dirty state
 # export PS1="\u@\h \w \[$txtcyn\]\$git_branch\[$txtred\]\$git_dirty\[$txtrst\]\$ "
 
-# see https://gnunn1.github.io/tilix-web/manual/vteconfig/
-# for some reference
 # Another variant:
-export PS1="$k8sctx\[$bldylw\]\$git_branch\[$txtcyn\]\$git_dirty\[$txtrst\]\n\[$bldgrn\]\u@\h\[$txtrst\]:\[$bldblu\]\w\[$txtrst\] \$ "
+export PS1="\$k8sctx\[$bldylw\]\$git_branch\[$txtcyn\]\$git_dirty\[$txtrst\]\n\[$bldgrn\]\u@\h\[$txtrst\]:\[$bldblu\]\w\[$txtrst\] \$ "
 
 # Default Git enabled root prompt (for use with "sudo -s")
 export SUDO_PS1="\[$bakred\]\u@\h\[$txtrst\] \w\$ "

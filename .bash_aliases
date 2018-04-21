@@ -1,5 +1,14 @@
 #!/bin/bash
 
+cnct_clone()
+{
+  set -e
+  repo="{$1:?Must provide repo name}"
+
+  git clone https://github.com/$USER/$repo && cd $repo && git remote add upstream https://github.com/samsung-cnct/$repo
+  set +e
+}
+
 fix_fsp()
 {
   while read -r f
@@ -83,7 +92,7 @@ if [ -x /usr/bin/dircolors ]; then
     #alias dir='dir --color=auto'
     #alias vdir='vdir --color=auto'
 
-    alias grep='grep --color=auto'
+    alias grep='grep -n --color=auto'
     alias fgrep='fgrep --color=auto'
     alias egrep='egrep --color=auto'
 fi
@@ -105,6 +114,16 @@ alias grm='g co master && g fetch --all && g reset --hard upstream/master && g r
 # Load rbenv automatically by appending
 # the following to ~/.bashrc:
 
-eval "$(rbenv init -)"
+#eval "$(rbenv init -)"
 
-alias superior_sshconfig='superior_sshconfig_update $HOME/.ssh/cyklops-superior $HOME/.kraken/cyklops-superior/ssh_config'
+alias supclusterupd='cluster_sshconfig_upd superior $HOME/.ssh/cyklops-superior $HOME/.kraken-superior/cyklops-superior/ssh_config'
+alias onclusterupd='cluster_sshconfig_upd onondaga $HOME/.ssh/onondaga $HOME/.kraken-onondaga/onondaga/ssh_config'
+alias hd='helm del --purge'
+# remove comments in front of these if skopos is ever decomissioned.
+#alias k='kubectl'
+#alias k2='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig'
+#alias k2env='printenv | grep -P '\''KRAKEN|K2|KUBE|HELM'\'''
+#alias k2g='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig get -o wide'
+#alias k2ga='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig get -o wide --all-namespaces'
+#alias kg='kubectl get -o wide'
+#alias kssh='ssh -F /home/jimconn/.kraken/cyklops-superior/ssh_config '
