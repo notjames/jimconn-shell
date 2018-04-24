@@ -1,8 +1,9 @@
 #!/bin/bash
 
+KRAKEN=${HOME}/.kraken       # This is the default output directory for Kraken
+
 kraken_env()
 {
-  KRAKEN=${HOME}/.kraken       # This is the default output directory for Kraken
   SSH_ROOT=${HOME}/.ssh
   AWS_ROOT=${HOME}/.aws
   AWS_CONFIG=${AWS_ROOT}/config  # Use these files when using the aws provider
@@ -73,6 +74,7 @@ setup_cluster_env()
 {
   local PROSPECT_KCFG KENV_RET
 
+  echo "KRAKEN is $KRAKEN"
   PROSPECT_KCFG=($KRAKEN/$CLUSTER_NAME $KRAKEN $(find "$(realpath "$KRAKEN")" -name 'admin.kubeconfig'))
 
   kraken_env
