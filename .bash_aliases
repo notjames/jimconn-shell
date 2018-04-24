@@ -116,8 +116,9 @@ alias grm='g co master && g fetch --all && g reset --hard upstream/master && g r
 
 #eval "$(rbenv init -)"
 
-alias supclusterupd='cluster_sshconfig_upd superior $HOME/.ssh/cyklops-superior $HOME/.kraken-superior/cyklops-superior/ssh_config'
-alias onclusterupd='cluster_sshconfig_upd onondaga $HOME/.ssh/onondaga $HOME/.kraken-onondaga/onondaga/ssh_config'
+alias supclusterupd='cluster_sshconfig_upd --region us-east-1 --cluster-name superior --id-file $HOME/.ssh/cyklops-superior --ssh-config $HOME/.kraken-superior/cyklops-superior/ssh_config'
+alias onclusterupd='cluster_sshconfig_upd --region us-east-1 --cluster-name onondaga --id-file $HOME/.ssh/onondaga --ssh-config $HOME/.kraken-onondaga/onondaga/ssh_config'
+alias jujuclusterupd='cluster_sshconfig_upd --region us-west-2 --cluster-name cmc-poc --id-file ~/.ssh/juju_id_rsa --cluster-type juju --ssh-config $KRAKEN/juju/ssh_config'
 alias hd='helm del --purge'
 # remove comments in front of these if skopos is ever decomissioned.
 #alias k='kubectl'
