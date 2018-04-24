@@ -74,7 +74,6 @@ setup_cluster_env()
 {
   local PROSPECT_KCFG KENV_RET
 
-  echo "KRAKEN is $KRAKEN"
   PROSPECT_KCFG=($KRAKEN/$CLUSTER_NAME $KRAKEN $(find "$(realpath "$KRAKEN")" -name 'admin.kubeconfig'))
 
   kraken_env
@@ -93,11 +92,12 @@ setup_cluster_env()
         pcfg=${pcfg/\/admin.kubeconfig/}
 
         [[ -f $pcfg/admin.kubeconfig ]] && \
+          JUJU_DATA=$pcfg && \
           KUBECONFIG=$pcfg/admin.kubeconfig && \
           break
       done
 
-      export CLUSTER_NAME KUBECONFIG HELM_HOME
+      export CLUSTER_NAME KUBECONFIG HELM_HOME JUJU_DATA
 
       alias k='kubectl'
       alias kg='kubectl get -o wide'
