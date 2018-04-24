@@ -25,7 +25,7 @@ cluster_name()
   local configs json_branches clname c
 
   clname="null"
-  configs=("config.yaml" "$(find . -name "*-bundle.yaml")")
+  configs=("$KRAKEN/config.yaml" "$(find . -name "*-bundle.yaml")")
   json_branches=('.deployment.clusters[0].name' '.deployment.cluster' '.name')
   c=0
 
@@ -37,9 +37,9 @@ cluster_name()
     do
       for branch in "${json_branches[@]}"
       do
-        if [[ -e $KRAKEN/$cfg ]]
+        if [[ -e $cfg ]]
         then
-          clname=$(< "$KRAKEN"/"$cfg" yaml2json - | jq -rc "$branch")
+          clname=$(< "$cfg" yaml2json - | jq -rc "$branch")
         fi
       done
     done
@@ -57,7 +57,6 @@ cluster_path()
     #cluster_cfg=$(basename $(find $KRAKEN/ -maxdepth 1 -type d -not \( -path $KRAKEN/ \) -name 'admin.kubeconfig') 2>/dev/null)
 
     CLUSTER_NAME="$(cluster_name)"
-    export CLUSTER_NAME
 
     if [[ -z "$CLUSTER_NAME" || "$CLUSTER_NAME" == "null" ]]
     then
@@ -72,14 +71,16 @@ cluster_path()
 
 setup_cluster_env()
 {
-  local PROSPECT_KCFG=($KRAKEN/$CLUSTER_NAME $KRAKEN) kenv_ret
+  local PROSPECT_KCFG KENV_RET
+
+  PROSPECT_KCFG=($KRAKEN/$CLUSTER_NAME $KRAKEN $(find "$(realpath "$KRAKEN")" -name 'admin.kubeconfig'))
 
   kraken_env
-  kenv_ret=$?
+  KENV_RET=$?
 
   [[ -d $HOME/.helm ]] && GLOBAL_HELM=$HOME/.helm
 
-  if [[ $kenv_ret == 0 ]]
+  if [[ $KENV_RET == 0 ]]
   then
     if cluster_path
     then
@@ -87,6 +88,8 @@ setup_cluster_env()
 
       for pcfg in "${PROSPECT_KCFG[@]}"
       do
+        pcfg=${pcfg/\/admin.kubeconfig/}
+
         [[ -f $pcfg/admin.kubeconfig ]] && \
           KUBECONFIG=$pcfg/admin.kubeconfig && \
           break
@@ -107,11 +110,11 @@ setup_cluster_env()
         then
     #      echo -e "\nLinking $KRAKEN/.helm to $HOME/.helm"
     #      echo -e "If this is undesirable, run 'rm \$KRAKEN/.helm'\n"
-          ln -sf "$GLOBAL_HELM $KRAKEN"/
+          ln -sf "$GLOBAL_HELM" "$KRAKEN"/
         else
           if rm "$KRAKEN"/.helm 2>/dev/null
           then
-            if ! ln -sf "$GLOBAL_HELM $KRAKEN"/
+            if ! ln -sf "$GLOBAL_HELM" "$KRAKEN"/
             then
               echo >&2 "Unable to link global .helm to cluster space. mv error code was $?"
             fi
@@ -140,19 +143,22 @@ setup_cluster_env()
 
 skopos_switch()
 {
-  [[ -n "$1" ]] && local new_cfg_loc="$1" || \
-    {
-      echo "switch requires valid environment name"
-      return 70
-    }
+  local new_cfg_loc
 
-  new_base=$(dirname $KRAKEN)/.kraken-$new_cfg_loc
+  if [[ -n "$1" ]]; then
+    new_cfg_loc="$1"
+  else
+    echo "switch requires valid environment name"
+    return 70
+  fi
+
+  new_base=$(dirname "$KRAKEN")/.kraken-$new_cfg_loc
 
   if [[ -d "$new_base" ]]
   then
     if [[ -L $KRAKEN ]]
     then
-      if rm $KRAKEN 2>/dev/null
+      if rm "$KRAKEN" 2>/dev/null
       then
         if ln -vsf "$new_base" "$KRAKEN"
         then

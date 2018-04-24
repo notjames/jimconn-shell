@@ -8,7 +8,7 @@ if [[ -e $SKOPOS ]]
 then
   echo "Setting up kraken environment"
 
-  source $SKOPOS
-  alias sk="$HOME/bin/skopos"
+  source "$SKOPOS"
+  alias sk="\$HOME/bin/skopos"
   setup_cluster_env
 fi
