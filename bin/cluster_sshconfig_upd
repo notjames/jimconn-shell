@@ -18,25 +18,43 @@ usage()
 get_each()
 {
   cluster_name=$1
+
   [[ -z $cluster_name ]] && \
     {
       echo >&2 "Usage: get_each(<cluster_name>)"
       return 1
     }
 
-  aws --region us-east-1 ec2 describe-instances \
-      --filter "Name=key-name,Values=*$cluster_name*" \
-      --query "Reservations[*].Instances[].{ \
-                 PublicDnsName:PublicDnsName,
-                 PublicIpAddress:PublicIpAddress,
-                 PrivateDnsName:PrivateDnsName,
-                 PrivateIpAddress:PrivateIpAddress,
-                 Name: Tags[?Key == 'Name'].Value,
-                 NodePool: Tags[?Key == 'k2-nodepool'].Value} | []" | \
-  jq -r '.[] | @sh "PUBLIC_DNS=\(.PublicDnsName) PUBLIC_ADDRESS=\(.PublicIpAddress) PRIVATE_DNS=\(.PrivateDnsName) PRIVATE_ADDRESS=\(.PrivateIpAddress) NAME=\(.Name[0]) POOL=\(.NodePool[0])"'
+  case $CLUSTER_TYPE in
+    kraken)
+      aws --region "$REGION" ec2 describe-instances \
+          --filter "Name=key-name,Values=*$cluster_name*" \
+          --query "Reservations[*].Instances[].{ \
+                     PublicDnsName:PublicDnsName,
+                     PublicIpAddress:PublicIpAddress,
+                     PrivateDnsName:PrivateDnsName,
+                     PrivateIpAddress:PrivateIpAddress,
+                     Name: Tags[?Key == 'Name'].Value,
+                     NodePool: Tags[?Key == 'k2-nodepool'].Value} | []" | \
+      jq -r '.[] | @sh "PUBLIC_DNS=\(.PublicDnsName) PUBLIC_ADDRESS=\(.PublicIpAddress) PRIVATE_DNS=\(.PrivateDnsName) PRIVATE_ADDRESS=\(.PrivateIpAddress) NAME=\(.Name[0]) POOL=\(.NodePool[0])"'
+    ;;
+  juju)
+      aws --region "$REGION" ec2 describe-instances \
+          --filter "Name=tag:Name, Values=juju-cmc-poc*" \
+          --query "Reservations[*].Instances[].{ \
+                     PublicDnsName:PublicDnsName,
+                     PublicIpAddress:PublicIpAddress,
+                     PrivateDnsName:PrivateDnsName,
+                     PrivateIpAddress:PrivateIpAddress,
+                     Name: Tags[?Key == 'Name'].Value,
+                     NodePool: Tags[?Key == 'juju-units-deployed'].Value} | []" | \
+     jq -r '.[] | @sh "PUBLIC_DNS=\(.PublicDnsName) PUBLIC_ADDRESS=\(.PublicIpAddress) PRIVATE_DNS=\(.PrivateDnsName) PRIVATE_ADDRESS=\(.PrivateIpAddress) NAME=\(.Name[0]) POOL=\(.NodePool[0])"'
+    ;;
+  esac
 }
 
-whereami() {
+whereami()
+{
   a="/$0"
   a=${a%/*}
   a=${a:-.}
@@ -48,31 +66,76 @@ whereami() {
   export BASEDIR
 }
 
+usage()
+{
+  echo >&2 """
+  Usage: $0 <--cluster-name name> <--identity-file /path/to/id_file> <--ssh-config /path/to/cluster/ssh_config>
+            [--region aws region] [--tmpl /path/to/ssh_config.tmpl] [--key-name something] [--help]
+
+  Defaults:
+  region        : us-east-1
+  template      : ./ssh_config.tmpl
+  cluster-type  : kraken
+
+  Options:
+  region        : any valid AWS region
+  cluster-type  : kraken or juju
+
+  """
+}
+
 declare -gA POOLCOUNT
 whereami
 
-TMPL="$BASEDIR/ssh_config.tmpl"
-CLUSTER_NAME=$1
-IDENTITY_FILE=$2
-SSH_CONFIG=$3
+TEMP=$(getopt -an "$0" --long help,region:,cluster-type:,tmpl:,cluster-name:,id-file:,ssh-config: -o hr:T:t:C:i:c: -- "$@")
+eval set -- "$TEMP"
 
-[[ -z "$CLUSTER_NAME" ]] && \
-  {
-    echo >&2 'Please specify the cluster name you seek after.'
-    exit 10
-  }
+while true
+do
+  case $1 in
+    --help|-h)
+      shift
+      usage
+      exit 0
+    ;;
+    --region|-r)
+      shift
+      REGION=$1
+    ;;
+    --cluster-type|-T)
+      shift
+      CLUSTER_TYPE=$1
+    ;;
+    --tmpl|-t)
+      shift
+      TMPL=$1
+    ;;
+    --cluster-name|-C)
+      shift
+      CLUSTER_NAME=$1
+    ;;
+    --id-file|-i)
+      shift
+      IDENTITY_FILE=$1
+    ;;
+    --ssh-config|-c)
+      shift
+      SSH_CONFIG=$1
+    ;;
+    --) break;;
+    *)
+      shift
+    ;;
+  esac
+done
 
-[[ -z "$IDENTITY_FILE" || ! -f "$IDENTITY_FILE" ]] && \
-  {
-    echo >&2 'Please specify the full path to a valid ssh identity file.'
-    exit 11
-  }
-
-[[ -z "$SSH_CONFIG" || ! -d "$(dirname "$SSH_CONFIG")" ]] && \
-  {
-    echo >&2 'Please specify the full path to the ssh config file you want to generate.'
-    exit 12
-  }
+REGION=${REGION:="us-east-1"}
+TMPL="${TMPL:="$BASEDIR"/ssh_config.tmpl}"
+CLUSTER_TYPE=${CLUSTER_TYPE:="kraken"}
+CLUSTER_NAME="${CLUSTER_NAME:?Please specify the cluster name you seek after.}"
+IDENTITY_FILE="${IDENTITY_FILE:?Please specify the full path to a valid ssh identity file.}"
+#SSH_CONFIG="${SSH_CONFIG:?Please specify the full path to the ssh config file you want to generate.}"
+SSH_CONFIG="${SSH_CONFIG:=/dev/stdout}"
 
 # back up the file if it exists.
 mv -f "$SSH_CONFIG" "$SSH_CONFIG~" 2>/dev/null
@@ -90,5 +153,6 @@ do
   SHORT_NAME="$(echo "$NAME" | cut -d _ -f 1)"
   POOL="$POOL-${POOLCOUNT[$POOL]}"
 
+  sleep 1
   envsubst '$NAME $SHORT_NAME $PRIVATE_DNS $PRIVATE_ADDRESS $PUBLIC_DNS $PUBLIC_ADDRESS $IDENTITY_FILE $POOL' < "$TMPL" >> "$SSH_CONFIG"
 done < <(get_each "$CLUSTER_NAME")
