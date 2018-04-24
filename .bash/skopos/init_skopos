@@ -1,0 +1,14 @@
+#!/bin/bash
+
+export SKOPOS=$BASH_SCRIPTS/skopos/skopos.bash
+
+# Begin Kraken env functions install_skopos
+# test
+if [[ -e $SKOPOS ]]
+then
+  echo "Setting up kraken environment"
+
+  source $SKOPOS
+  alias sk="$HOME/bin/skopos"
+  setup_cluster_env
+fi
