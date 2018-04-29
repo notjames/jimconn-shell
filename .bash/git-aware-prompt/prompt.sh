@@ -24,7 +24,7 @@ find_k8s_things()
 {
   k8sctx=''
 
-  k8sctx=$(/usr/local/bin/kubectx | sed 's/_.*//')
+  k8sctx=$(/usr/local/bin/kubectx | cat -A - | grep -P '33m' | perl -lne '/33m([\w-]+)\^\[/; print $1' | sed -re 's/_.*//')
 
   if [[ -z $k8sctx ]]
   then
