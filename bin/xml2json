@@ -1,0 +1,9 @@
+#!/usr/bin/ruby
+
+require 'xml2json'
+
+file2parse = ARGV[0]
+file2parse = STDIN if file2parse.nil?
+
+puts XML2JSON.parse(File.read(file2parse).chomp)
+

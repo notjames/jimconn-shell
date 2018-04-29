@@ -1,0 +1,3 @@
+#!/bin/bash
+echo 'Using: ' "$*"
+JAVA_HOME=/opt/sunjdk1.7-32 /opt/sunjdk1.7-32/bin/java $*

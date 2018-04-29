@@ -1,0 +1,165 @@
+#!/usr/bin/perl -lw
+
+use JSON;
+use strict;
+use Pod::Usage;
+use Data::Dumper;
+use Getopt::Long;
+use WWW::TheMovieDB::Search;
+
+my $json    = new JSON;
+my $config  = parse_cli();
+my $flixapi = setup();
+
+my $attrmap = {
+                  'rating'      => 'certification',
+                  'movie'       => 'title',
+                  'description' => 'overview',
+              };
+
+for my $searchfor ( @{$config->{searchterm}} )
+{
+    my $results = $flixapi->Movie_search($searchfor);
+
+    if ( $results and $results != '' )
+    {
+        $results = $json->decode($results);
+
+        for my $title ( @$results )
+        {
+            if ( $title =~ /nothing found/i )
+            {
+                print $title;
+                exit 1;
+            }
+            else
+            {
+                print 'There is/are: ' . ~~@$results .'  result(s).';
+
+                if ( $title->{movie_type} eq 'movie' )
+                {
+                    if ( $config->{attribs} )
+                    {
+                        for my $key ( @{$config->{attribs}} )
+                        {
+                            if ( defined($title->{$key}) )
+                            {
+                                print $key . ': ' . $title->{$key};
+                            }
+                        }
+                    }
+                    else
+                    {
+                        print 'Movie: ' . $title->{original_name};
+                        print 'Released: ' . $title->{released};
+                        print 'Rating: ' . $title->{certification};
+                        print 'URL ' . $title->{url};
+                        print 'Description: ' . $title->{overview};
+                    }
+                }
+            }
+
+            print "\n" . '*' x 10 . "\n";
+        }
+    }
+    else
+    {
+        print 'No results returned from server or server not available.';
+        exit 4;
+    }
+
+    sleep 1;
+}
+
+sub parse_cli
+{
+    my ($config, $help, $verbose, $key, @search, @attribs);
+
+    GetOptions(
+                  'key=s'    => \$key,
+                  'help+'    => \$help,
+                  'verbose+' => \$verbose,
+                  'search=s' => \@search,
+                  'attribs=s'=> \@attribs,
+             );
+
+    if ( $key and $key ne '' )
+    {
+        $config->{key} = $key;
+    }
+
+    if ( $help )
+    {
+        pod2usage(-exitval => 0);
+    }
+
+    if ( $verbose )
+    {
+        $config->{verbose}++;
+    }
+
+    if ( @search )
+    {
+        $config->{searchterm} = normalize(\@search);
+    }
+    else
+    {
+        pod2usage(-exitval => 2,
+                  -message => 'Must specify a title search term.');
+    }
+
+    if ( @attribs )
+    {
+        $config->{attribs} = normalize(\@attribs);
+    }
+
+    return($config);
+}
+
+sub setup
+{
+    my $flixapi = new WWW::TheMovieDB::Search('a967c5726934db2ebbe5655d2b6c65b3');
+       $flixapi->lang('en');
+       $flixapi->ver(3);
+       $flixapi->type('json');
+
+    return($flixapi);
+}
+
+sub normalize
+{
+    my $data = shift();
+    my @result;
+
+    for my $string ( @$data )
+    {
+        if ( $string =~ /,/ )
+        {
+            push(@result,split(',',$string));
+        }
+        else
+        {
+            push(@result,$string);
+        }
+    }
+    return(\@result);
+}
+
+=pod
+
+=head1 TITLE
+
+flix2 CLI tool
+
+=head1 DESCRIPTION
+
+flix2 uses TheMovieAPI to get movie data information.
+
+=head1 SYNOPSIS
+
+flix2 --search <term> [--attribs <attribute>,...] [--help] [--key <TMDB API key>] [--verbose]
+
+=head1 AUTHOR
+
+=head1 BUGS
+

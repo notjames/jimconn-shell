@@ -1,0 +1,19 @@
+#!/bin/bash
+
+music_dir=~/Music
+playlist="$music_dir/.playlist.txt"
+wildcard="$*"
+
+if cd $music_dir
+then
+    [[ -f $playlist ]] && rm $playlist
+
+    if [[ -n "$wildcard" ]]
+    then
+      IFS=$'\n' ls -1 $wildcard > $playlist
+    else
+      ls -1 *.{mp3,mp4,ogg} > $playlist 2>/dev/null
+    fi
+
+    mplayer -shuffle -playlist $playlist
+fi

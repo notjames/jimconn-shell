@@ -1,0 +1,26 @@
+#!/bin/bash
+
+stuff=$(docker ps | grep nginx-rails-dev:latest | awk '
+{
+    name = $1;
+    l    = split($0, words, " ");
+
+    for (i = 0 ; i <= l ; i++ ) 
+    {
+        if ( words[i] ~ /_/ ) 
+        {
+            id = words[i];
+        }
+    }
+    
+    print name;
+    print id;
+}')
+
+echo $stuff | \
+while read id name
+do
+    echo 'commiting '$id' and attaching to '$name
+    docker commit $id 
+    echo "run docker attach $name"
+done

@@ -1,0 +1,27 @@
+#!/bin/bash -x
+
+function is_running()
+{
+    what=$1
+
+    [ -z "$1" ] && echo '' && return
+
+    ps -ef | grep java | grep "$1" | awk '{print $2}'
+}
+
+function kill_it()
+{
+    pids="$*"
+    kill -9 $pids
+}
+
+function start_it()
+{
+    #(bash -x ~/davmail/davmail.sh&) ; (tail -F --pid=$! ~/davmail/davmail.log)
+    (bash -x /usr/bin/davmail&) ; (tail -F --pid=$! ~/davmail/davmail.log)
+}
+
+pids=$(is_running davmail)
+
+[ -z "$pids" ] && start_it || (kill_it $pids && start_it)
+

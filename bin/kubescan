@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# USAGE
+# kubescan.sh [kubeconfig.yaml] > state.yaml
+
+# Goal:
+# - Provide a quick way to dump the state of a cluster for analysis
+# - Simplify verification of live state of the cluster
+
+KUBECONFIG=${1:-$KUBECONFIG}
+
+fail ()
+{
+  echo "$2" >&2
+
+  # shellcheck disable=SC2086
+  exit $1
+}
+
+kubedo ()
+{
+  kubectl --kubeconfig="$KUBECONFIG" -o yaml "$@"
+}
+
+yaml_doc ()
+{
+  echo '%YAML 1.1'
+  echo '--- #' "$1"
+  cat
+  echo '...'
+}
+
+test -f "$KUBECONFIG" || fail 1 "Provide a valid kubeconfig file"
+
+THINGS_TO_GET="$(kubectl get 2>&1 | \
+                 grep -v 'all'    | \
+                 grep -P '\s+\*'  | \
+                 tr -d "'"        | \
+                 perl -ln -e '
+                    my @x;
+                    s/^\s*//g;
+                    tr/[\(\)\*]//d;
+                    s/error:.*//;
+                    my @x = split(/ /);
+                    ( $x[3] ) ? print $x[3] : print $x[1]')"
+
+# NOTE: the node details can be extremely useful, but may generate some redundant data with
+# the other resource types below.
+# kubedo get nodes | yaml_doc 'nodes'
+
+# grab namespaces first mostly becuase
+# the rest of the commands normalize amongst themselves
+# but namespaces don't live in a namespace per se.
+kubedo get ns | yaml_doc 'namespaces'
+
+for kubeobj in $THINGS_TO_GET
+do
+  [[ "$kubeobj" == "ns" ]] && continue
+  kubedo get "$kubeobj" --all-namespaces | yaml_doc "$kubeobj"
+done

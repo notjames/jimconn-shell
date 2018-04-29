@@ -1,0 +1,6 @@
+#!/bin/bash
+
+if /sbin/cryptsetup luksOpen /dev/sdb5 old_volume
+then
+    sudo mount -t ext4 -oro,owner /dev/vg0-orig/home old_volume
+fi

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+c=0 
+startfreq=36
+
+for dev in $(netstat -i | awk '{print $1}' | grep -v wlan0 | grep wlan)
+do
+     [ $c -gt 0 ] && let startfreq=$((startfreq + 4))
+    
+     combo=$dev:$startfreq
+ 
+     sudo /usr/local/sbin/airmon-ng start $dev $startfreq
+   
+    let c++
+done

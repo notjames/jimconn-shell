@@ -1,0 +1,21 @@
+#!/bin/bash
+
+echo "Date,#Seconds"
+
+wlc-auth-inspector.pl $* | \
+    grep -P '8021x|roam_evt_start|roam_took' | \
+    wit | \
+    awk -F"'" '{print $8","$12}' | \
+
+    perl -ne '
+    
+    $_ =~ tr/ms//;
+    
+    my($keep,$field) = split(/,/);
+
+    my $m  = (split(/ /,$field))[0]; 
+    my $s  = (split(/ /,$field))[1]; 
+    my $ms = (split(/ /,$field))[2];
+    
+    printf("%s,%.3f\n",$keep,($m + $s + $ms));
+'

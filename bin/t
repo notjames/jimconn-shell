@@ -1,0 +1,38 @@
+#!/bin/bash
+
+start_time_secs=$(date +%s)
+init_sleep_time=3
+max_sleep_time=30
+amortized_increments=3
+
+echo 'start_time_secs is: '$start_time_secs
+
+while true
+do
+  echo do_checkin
+
+  now_time_secs=$(date +%s)
+  delta_secs_since_start=$((now_time_secs - start_time_secs))
+  modulus=$((delta_secs_since_start % amortized_increments))
+
+  echo 'now_time_secs is '$now_time_secs
+  echo 'delta_secs_since_start is: '$delta_secs_since_start
+  echo 'modulus is '$modulus
+
+  if   [[ $mod_time -le 3 && $amortized_increments == 3 ]]
+  then
+
+    [[ $delta_secs_since_start -gt 10 ]] && amortized_increments=6
+
+  elif [[ $mod_time -le 6 && $amortized_increments == 6 ]]
+  then
+
+    [[ $delta_secs_since_start -gt $max_sleep_time ]] && amortized_increments=$max_sleep_time
+
+  fi
+
+  echo sleeping for $amortized_increments
+  sleep $amortized_increments
+  echo
+done
+

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ ! -z "$1" ]
+then
+    virt=$1
+    [ $virt = "win7" ] && virt=Windows7
+else
+    echo 'No virtual machine name given...'
+    exit 1
+fi
+
+/usr/bin/virtualbox --startvm $virt

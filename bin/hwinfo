@@ -1,0 +1,1106 @@
+#!/usr/bin/ruby 
+# By Jim Conner <jimconn@amazon.com>
+# AFT Client Engineering 2013
+# 
+# as part of the FCAssetDBClient brazil package
+# and under the FCAssetDBWebsite suite.
+#
+# $Author; $
+# $Date: $
+# $Log: $
+# $Header: $
+#
+# ************************************************************************
+
+require 'socket'
+require 'sys/uname'
+require 'sys/filesystem'
+require 'sys/uptime'
+require 'sys/cpu'
+require 'cgi'
+require 'json'
+require 'net/http'
+require 'dmidecode'
+require 'ostruct'
+require 'optparse'
+require 'logger'
+
+OUTPUT  = Logger.new(STDOUT)
+VERSION = ('$Version: 1.0 $'.gsub(/\$|Version:|\s+/,''))    # updated by git/scm
+AUTHOR  = ('$Author: jimconn $'.gsub(/\$|Author:|\s+/,''))  # ''
+UPDATED = ('$Date: Mon Oct 21 2013 21:57:05 PDT $'.gsub(/\$|Date:/,''))
+UA      = (File.basename($0).gsub('.rb','-')) + VERSION
+MEMINFO = '/proc/meminfo'
+ROUTES  = '/proc/net/route'
+PROCDIR = '/sys/class/net'
+BASE    = '/var/tmp'                                        # better location, no root req'd
+$ENVNM  = 'prod'                                            # ARGV --environment (prod by default)
+$TIMEOUT= 6                                                 # seconds - http request timeout
+$TMFUZZ = 10                                                # minutes - meaning that this 
+                                                            # script will actually gather and 
+                                                            # send data to the server
+                                                            # within rand(TMFUZZ) mins of
+                                                            # invocation.
+
+include Sys
+
+# ********* Some monkey patching... ***********
+
+# Ruby 1.9.x doesn't have have #to_a for the String
+# class anymore, so monkey-patching here.
+class String
+# create an array out of the string presented from caller
+    def to_a
+        self.instance_of?(Array) && return
+        self.lines.to_a
+    end
+
+    def rm_non_ascii(replacement='') 
+        self.gsub(/[\u0080-\u00ff]/,replacement)
+    end
+end
+
+# Monkey patch hash to give a semi-openstruct way of
+# turning a hash into a method call
+class Hash
+    def method_missing(m)
+        key = m.to_s
+        return self[key] if self.has_key? key
+        super
+    end
+end
+
+# Monkey patch Array to add regular expression
+# match per element of an Array.
+class Array
+    def REmatch(pattern)
+        unless pattern.nil?
+            re = Regexp.new(pattern)
+
+            self.map{|e| re.match(e).to_s if re.match(e).to_s != ''}.compact #.size
+        else
+            false
+        end
+    end
+end
+
+# **************    Our classes    ****************
+
+class Runtime
+    attr_reader :hostname
+
+    def self.cli_options(args)
+        @hostname           = Socket.gethostname
+        options             = OpenStruct.new
+        options.verbose     = false
+        options.exec_now    = false
+        options.dryrun      = false
+        options.fuzz_factor = $TMFUZZ
+        options.endpoint    = nil
+        options.environment = nil
+        options.dmi         = nil
+
+        OUTPUT.level        = Logger::INFO
+
+        parsed = OptionParser.new\
+                 {|opts|
+                     opts.banner = "Usage: #{$0}"
+ 
+                     opts.on('-d', '--debug', 'Show debug output')\
+                     do |debug|
+                         options.verbose = debug
+                         OUTPUT.level    = Logger::DEBUG
+                         OUTPUT.debug('Output level set to debug...')
+                     end
+ 
+                     opts.on('-n', '--dry-run', 'Dryrun. Do not send data to the server.')\
+                     do |dryrun|
+                         options.dryrun  = true
+                         OUTPUT.debug('Dry-run only. No data will be sent to AssetDB')
+                     end
+
+                     opts.on('-F <s>', '--fuzz-factor <seconds>', Integer, 
+                             'Set fuzz factor (default is: ' + $TMFUZZ.to_s + ')')\
+                     do |fuzz|
+                         if fuzz > 0 and fuzz <= 60
+                             options.fuzz_factor = fuzz
+                         else
+                             OUTPUT.fatal('Fuzz factor must be greater than 0 and <= 60.')
+                             exit 1
+                         end
+
+                         OUTPUT.info('Fuzz factor set to: ' + fuzz.to_s + ' minutes')
+                     end
+ 
+                     opts.on('-N', '--now', 'Skip time fuzz and execute NOW!')\
+                     do |now|
+                         options.exec_now = now
+                         OUTPUT.info('By-passing fuzz-factor start and executing NOW!')
+                     end
+ 
+                     opts.on('-E <endpoint>', '--endpoint <assetdb server>', String,
+                             'valid host to which to send updates.')\
+                     do |endpoint|
+                        unless endpoint =~ /^https?:\/\//
+                            endpoint = 'https://' + endpoint
+
+                            OUTPUT.info('Prepended https:// as scheme of URI making: ' + endpoint)
+                        end
+
+                        unless endpoint =~ /\.amazon\.com$/
+                            endpoint = endpoint + '.amazon.com'
+
+                            OUTPUT.info('Appended ".amazon.com" to URI making: ' + endpoint)
+                        end
+
+                        options.endpoint = endpoint
+                        OUTPUT.info(' final endpoint used: ' + endpoint)
+                     end
+
+                     opts.on('--environment <type>',[:dev,:beta,:gamma,:prod],
+                              'Use "dev", "beta|gamma", or "prod" (required)')\
+                     do |runtime_env|
+                        options.environment  = runtime_env
+                     end
+
+                     opts.on('--use-dmidecode </path/to/dmidecode>',String,
+                             'Valid path to dmidecode application')\
+                     do |dmidecode|
+                        begin
+                            binary_file = File.new(dmidecode)
+                            options.dmi = dmidecode
+
+                            OUTPUT.info('Will attempt using dmidecode found at: ' + dmidecode)
+                        rescue => e
+                            OUTPUT.fatal('Path you specified: ' + dmidecode.inspect + ' is invalid: ' + e.exception.to_s)
+                            exit 2
+                        end
+                     end
+
+                     opts.on_tail("-h", "--help", "Show this message")\
+                     do
+                         puts opts
+                         exit 0
+                     end
+                 }
+
+        parsed.parse!(args)
+        options
+    end
+end
+
+class HwInfoClient
+    attr_accessor :version, :version_date, :last_author, :info
+
+    def initialize
+        @version      = VERSION
+        @version_date = UPDATED
+        @last_author  = AUTHOR
+
+        @info         = {
+                            :version      => @version, 
+                            :version_date => @version_date, 
+                            :last_author  => @last_author
+                        }
+
+        OUTPUT.debug(' - client info gathered: ' + @info.inspect)
+    end
+end
+
+class Environment < Runtime
+    attr_accessor :name, :default_prod, :default_dev, :default_gamma,
+                  :env_whid, :nls_whid, :endpoint, :options, :stage, :system_env, :cmdline
+
+    def initialize
+        @options       = Runtime.cli_options(ARGV)
+        @cmdline     = {'data' => _get_cmdline}
+        @system_env  = {'data' => _get_system_env}
+    end
+    
+    private
+    def _get_cmdline
+        @method_name = __method__.to_s
+        cmdline      = '/proc/cmdline'
+        
+        unless File.stat(cmdline).nil?
+            begin
+                data = File.open(cmdline).read.chomp.gsub!(/\s+/,' ').split(/\s/)
+            rescue
+                data = 'Unable to read ' + cmdline
+            end
+        else
+            data = cmdline + ' does not exist on this system.'
+        end
+        
+        data
+    end
+
+    def _get_system_env
+        Hash[ENV]
+    end
+end
+
+
+class Device < Environment
+    attr_accessor :id, :dmi, :reported_whid, :endpoint
+
+    def initialize(env)
+        @dmi           = _dmidecode(env.options)
+        @id            = _craft_device_id
+    end
+
+    private
+    def _craft_device_id
+        unless @dmi.nil?
+            sn    = @dmi.system_serial_number.tr_s('-','')
+            make  = @dmi.system_manufacturer.slice(0,8).tr_s(' ','').tr_s('-','')
+            model = @dmi.system_product_name.slice(0,8).tr_s(' ','').tr_s('-','')
+            
+            @id   = make + '-' + model + '-' + sn
+        else
+            raise RuntimeError, 'Unable to determine device ID. DMI Data not obtainable.'
+        end
+    end
+
+    def _dmidecode(options)
+        # Let's do it this way. Order of precedence. 
+        # options.dmi
+        # /usr/bin/dmidecode
+        # ./dmidecode
+        # /usr/sbin/dmidecode
+        # /usr/local/sbin/dmidecode
+
+        dmidecode_binary = ''
+
+        relpath = File.expand_path File.dirname(__FILE__)
+        miss    = 0
+        dmi_bin = [
+                       relpath + '/dmidecode',
+                       '/usr/bin/dmidecode',
+                       '/usr/sbin/dmidecode',
+                       '/usr/local/sbin/dmidecode'
+                  ]
+
+        unless options.dmi.nil?
+            dmidecode_binary = options.dmi
+
+            begin
+                File.stat(dmidecode_binary).nil?
+
+                return @dmi = DMI::Decode.new(:dmidecode => dmidecode_binary)
+            rescue
+                OUTPUT.warn('  ' + options.dmi.to_s + ' does not exist.')
+            end
+        end
+
+        dmi_bin.each \
+        {|try_it|
+            begin
+                dmidecode_binary = "#{try_it}"
+
+                unless File.stat(dmidecode_binary).nil?
+                    break
+                end
+            rescue
+                miss += 1
+            end
+        }
+
+        if miss > 0 and miss == dmi_bin.count
+            OUTPUT.fatal 'Unable to locate a valid dmidecode binary. Quitting. ' + 
+                         'Try running with --use-dmidecode /path/to/dmidecode.'
+        end
+
+        @dmi = DMI::Decode.new(:dmidecode => dmidecode_binary)
+    end
+end
+
+class Network
+    attr_reader :essid, :ifs, :devices, :all, :state, :wifis
+    alias_method :interfaces, :ifs
+
+    def initialize
+        _devices
+        _instantiate_ifs
+        _get_interface_data
+        @all
+    end
+    
+    # returns MAC for interface request by caller or hash of interfaces with 
+    # respective MAC address if no args supplied. Returns nil if interfaces
+    # don't exist or supplied interface from caller is non existent.
+    def hwaddr(args = {})
+        unless args[:interface].nil?
+            @ifs.each\
+            {|interface|
+                hwaddress = File.read(PROCDIR + "/#{interface}/" + address).chomp
+
+                unless hwaddress.nil?
+                    hwaddr["#{interface}"] = hwaddress
+                end
+            }
+        else
+            interface = args[:interface]
+            hwaddress = File.read(PROCDIR + "/#{interface}/" + address).chomp
+
+            unless hwaddress.nil?
+                hwaddr["#{interface}"] = hwaddress
+            end
+        end
+    end
+
+    def gw(interface)
+        _get_default_gw(interface)
+    end
+
+    private
+    def _devices
+    # Ignore sit0 and lo. We know they exist on every Linux machine.
+        @ifs  = (Dir.glob(PROCDIR + '/*').map{|dir| File.basename(dir)} - %w(sit0 lo))
+    end
+
+    # if up + cable: carrier=1, dormant=0, operstate=up
+    # if up + NO cable: carrier=0, dormant=0, operstate=down
+    # if down + cable: cat carrier=Invalid argument, cat dormant=Invalid argument, operstate=down
+    # Not very DRY. I'll fix later. Time crunch.
+    def _get_ifstate(interface)
+        unless interface.nil?
+            @status = File.read(PROCDIR + "/#{interface}/operstate").chomp
+        end
+
+        @state
+    end
+
+    # Make each interface an instance variable so that one can do:
+    # ifs = Network.new.eth0
+    # and get the data for eth0
+    def _instantiate_ifs
+        @ifs.each{|i| instance_variable_set("@#{i}",'empty')}
+        nil
+    end
+
+    def _get_essid(interface)
+        # Copied from wireless.h
+        iwreq = [interface, " " * 32, 32, 0 ].pack('a16pII')
+        sock = Socket.new(Socket::AF_INET, Socket::SOCK_DGRAM, 0)
+
+        sock.ioctl('0x8B1B', iwreq)
+
+        interface, essid, len, flags = iwreq.unpack('a16pII')
+        @essid
+    end
+
+    # can't get bssid using ioctl or at least I couldn't find
+    # a way. According to wireless.h (and I don't know C
+    # that well so I could be wrong), the functions for bssid
+    # are used for setting the bssid rather than obtaining
+    # the bssid. iw doesn't even have a function call for 
+    # obtaining the bssid. Wpa_cli doesn't use ioctl. It uses
+    # the same method I'm using in _wpa_status to pull general
+    # wifi info. Iw doesn't have a get function for bssid.
+    # Use of this method requires hwinfo to be run as root, however.
+    # In fact, at the system level, any method used to pull 
+    # bssid requires permissions of a priviledged user.
+    def _wpa_status(interface)
+        wpa_data = nil
+
+        unless interface.nil?
+            # need to write a method to get the src_sock_path 
+            # programmatically. Fortunately, for thinclients
+            # this is going to be the correct sock path 99%.
+            # ideas to get programmatically would be:
+            # parse wpa_supplicant.conf
+            # check process table | grep wpa_suppl | parse arguments
+            src_sock_path  = '/var/run/wpa_supplicant/' + interface
+        else
+            return nil
+        end
+
+        client_sock_path = '/var/run/hwinfo_wpa'
+
+        # open Domain socket
+        socket = Socket.new(Socket::AF_UNIX, Socket::SOCK_DGRAM, 0)
+
+        begin
+            # bind client domain socket
+            socket.bind(Socket.pack_sockaddr_un(client_sock_path))
+
+            # connect to server with out client socket
+            socket.connect(Socket.pack_sockaddr_un(src_sock_path))
+
+            # send the STATUS command
+            socket.send("STATUS", 0)
+
+            # receive 1024 bytes (totally arbitrary value)
+            # split lines by \n
+            # store in instance variable @wifis.
+            wpa_data = socket.recv(1024)
+        rescue => e
+            OUTPUT.warn('Unable to gether wpa data: ' + e.exception.to_s)
+        end
+        # close or next time we attempt to read it will fail.
+        socket.close
+
+        begin
+            # remove the domain socket file for the client
+            File.unlink(client_sock_path)
+        rescue => e
+            OUTPUT.warn(e.exception.to_s)
+        end
+
+        unless wpa_data.nil?
+            @wifis = Hash[wpa_data.split(/\n/).map\
+                     {|line|
+                        # first, split into pairs delimited by '='
+                        key,value = line.split('=')
+
+                        # if key is camel-humped then put space in front
+                        # of capped letter
+                        if key =~ /[a-z][A-Z]/
+                            key.gsub!(/([a-z])([A-Z])/,'\\1_\\2')
+                        end
+
+                        # if key is "id" then rename it.
+                        key.eql?('id') && key = 'wpa_id'
+
+                        # if key is "ip_address" then rename it to wpa_ipaddr. It
+                        # will already exist.
+                        key.eql?('ip_address') && key = 'wpa_ipaddress'
+
+                        # the thinclients currently send "address" instead of "hwaddress"
+                        # for the mac address:
+                        key.eql?('address') && key = 'hwaddr'
+
+                        # fix key so that it can be used as a table name
+                        # by replacing spaces with underscores
+                        key.gsub!(' ','_')
+
+                        # lower case it.
+                        key.downcase!
+
+                        [key,value]
+                     }]
+        end
+    end
+
+    def _get_default_gw(interface)
+        gw_addr = nil
+
+        unless interface.nil?
+            _get_route_table.each\
+            {|route|
+                if ( route.iface == interface and route.destination == '00000000')
+                    gwaddr = route.gateway.to_s.hex
+                    ipaddr = [24, 16, 8, 0].collect {|b| (gwaddr >> b) & 255}.reverse
+                    
+                    begin
+                        gw_addr = Socket.gethostbyaddr(ipaddr.pack('CCCC'))[0] || ipaddr.join('.')
+                    rescue
+                        gw_addr = ipaddr.join('.')
+                    end
+                end
+            }
+        end
+
+        gw_addr
+    end
+
+    def _get_route_table
+        route_tbl = []
+        keys      = []
+
+        File.open(ROUTES).each\
+        {|line|
+            line.gsub!(/\t/,',').gsub!(/\s/,'')
+
+            unless ( line =~ /eth|wlan/i )
+                keys = line.downcase
+            else
+                # the following broken down from right to left:
+                # the results of line.split(',') and keys.split(',') are arrays created from
+                # comma-delimited strings from the route table in /proc/net/route.
+                # Hash[array1.zip(array2)] creates a hash the keys of which are derived from array1
+                # and the values are derived from array2 (blends two arrays into a hash)
+                # OpenStruct takes a hash and turns the key values into method names so that
+                # calling some value from hash instead of using: hash['key'] one uses
+                # hash.key
+                route_tbl << combined = OpenStruct.new(Hash[(keys.split(',')).zip(line.split(','))])
+            end
+        }
+
+        route_tbl
+    end
+
+    def _get_ifaddr(interface)
+        unless interface.nil?
+            begin
+                socket = Socket.new(Socket::AF_INET,Socket::SOCK_DGRAM,0)
+
+                # /usr/include/net/if.h, structure ifreq
+                ifreq = [interface].pack 'a32'
+
+                # 0x8915 is SIOCGIFADDR in /usr/include/bits/ioctls.h
+                socket.ioctl 0x8915, ifreq
+                ifreq[18, 6].unpack('C*')[2 .. 5].join('.')
+            rescue
+                'Not set'
+            end
+        else
+            OUTPUT.warn('Interface was not specified from caller: ' + __LINE__.to_s)
+        end
+    end
+
+    def _get_subnet(interface)
+        unless interface.nil?
+            begin
+                socket = Socket.new(Socket::AF_INET,Socket::SOCK_DGRAM,0)
+
+                # /usr/include/net/if.h, structure ifreq
+                ifreq = [interface].pack 'a32'
+
+                # 0x891b is SIOCGIFNETMASK in /usr/include/linux/sockios.h
+                ifsubnet = socket.ioctl 0x891b, ifreq
+                ifreq[18, 6].unpack('C*')[2 .. 5].join('.')
+            rescue
+                'Not set'
+            end
+        else
+            OUTPUT.warn('Interface was not specified from caller: ' + __LINE__.to_s)
+        end
+    end
+
+    def _get_cdp_data
+        cdp_data_file = '/var/tmp/cdpr_data.txt'
+        cdp_data      = nil
+
+        begin
+            if cdp = File.new(cdp_data_file)
+                # read file and remove trailing "\n"s
+                # split into array delimited by "\n"
+                # go through each element
+                # and take only elements 7 through the end
+                # globally substitute the return from /regex/ with ''
+                # remove any '' or nil elements from returned array
+                cdp_data = cdp.read.chomp!                   
+                           .split(/\n/)[7 .. cdp.size]       
+                           .map{|element|                    
+                                 element.gsub!(/^\s+value:\s+/,'')
+                            } - ['',nil]                     
+            end
+
+            cdp_data = cdp_data.join('/')
+        rescue => e
+            cdp_data = 'Pending: ' + e.exception.to_s
+            OUTPUT.warn(cdp_data)
+        end
+
+        cdp_data
+    end
+
+    def _get_interface_data
+        whats_where = {
+                         :ethernet  => {
+                                           :basedir => PROCDIR     ,
+                                           :state   => '/operstate',
+                                           :hwaddr  => '/address'  ,
+                                           :speed   => '/speed'    ,
+                                           :duplex  => '/duplex'   ,
+                                           :mtu     => '/mtu'      ,
+                                       },
+                          :wifis    => {
+                                           :basedir => PROCDIR     ,
+                                           :state   => '/operstate',
+                                           :hwaddr  => '/address'  ,
+                                           :mtu     => '/mtu'      ,
+                                       },
+                      }  
+        
+        @ifs.each\
+        {|interface|
+            ( interface =~ /eth/ ) ? base = whats_where[:ethernet] : base = whats_where[:wifis]
+            tmp = {}
+
+            # skip interfaces we'll most likely need not know about
+            next unless ( interface =~ /eth|wlan/ )
+
+            tmp['interface'] = interface
+            tmp['gateway']   = gw(interface)
+            tmp['subnet']    = _get_subnet(interface)
+            tmp['ipaddr']    = _get_ifaddr(interface)
+            tmp['state']     = _get_ifstate(interface)
+            tmp['cdp_info']  = _get_cdp_data          if interface =~ /eth/
+            tmp['wpa_info']  = _wpa_status(interface) if interface =~ /wlan\d/
+
+            base.keys.each \
+            {|symbol|
+                # skip base directory
+                next if symbol.to_s == 'basedir'
+
+                file        = base[:basedir].to_s + "/#{interface}" + base[symbol]
+                status_type = symbol.to_s.gsub('/','')
+
+                if File.exist?(file)
+                    begin
+                        data = File.read(file).chomp
+
+                        if status_type =~ /speed/ and tmp['state'] == 'down'
+                            tmp["#{status_type}"] = 0
+                        else
+                            tmp["#{status_type}"] = data
+                        end
+                    rescue => e
+                        error = 'Unable to read: ' + file.to_s + ': ' + e.exception.to_s
+                        # Don't get confused by this. Assigns error to variable 
+                        # and then outputs it Just a little shorthand.
+                        OUTPUT.warn(tmp["#{status_type}"] = error)
+                    end
+                else
+                    tmp["#{status_type}"] = nil
+                end
+            }
+
+            instance_variable_set("@#{interface}",tmp)
+
+            # I don't care what he says, this is genius!
+            # initializes @all as an array if it's not yet initialized
+            # and then pushes the hash into the array. Quick way of
+            # making an array of hashes.
+            # http://www.rubyinside.com/21-ruby-tricks-902.html
+            # under heading "Cut down on local variable definitions"
+            (@all ||= []) << {"#{interface}" => tmp}
+        }
+    end
+end
+
+class Hardware
+    attr_accessor :data, :http_path, :method_name, :app_options
+    attr_reader   :dmi, :cpu, :uname, :uptime, :filesystems, :network,
+                  :memory
+
+    def initialize(options)
+        @app_options = options
+        @dmi         = {'data' => dmi}
+        @cpu         = {'data' => cpu}
+        @uname       = {'data' => uname}
+        @uptime      = {'data' => uptime}
+        @network     = {'data' => network}
+        @memory      = {'data' => memory}
+    end
+
+    def dmi
+        dmi = Device.new(@app_options).dmi.all
+        OUTPUT.debug('DMI data: ' + dmi.inspect)
+
+        dmi
+    end
+
+    def cpu
+        cpus         = []
+
+        CPU.processors.each_with_index{|processor,idx|
+            thisproc = {}
+            processor.members.map{|member|
+                thisproc["#{member}".to_s] = processor["#{member}"].to_s
+            }
+
+            cpus << thisproc
+        }
+
+        cpus << {:load_avg  => CPU.load_avg,:version => CPU::VERSION,
+                 :cpu_stats => CPU.cpu_stats}
+
+        OUTPUT.debug('CPU data: ' + cpus.inspect)
+        cpus
+    end
+
+    def uname
+        uname        = {}
+
+        Uname.uname.members.each{|member|
+            uname["#{member}"] = Uname.uname["#{member}"]
+        }
+        
+        OUTPUT.debug('Uname data: ' + uname.inspect)
+        uname
+    end
+
+    def uptime
+        uptime = _humanize(Uptime.seconds)
+        uptime = {:boot_time => Uptime.boot_time.inspect,
+                  :uptime    => uptime}
+
+        OUTPUT.debug('Uptime data: ' + uptime.inspect)
+        uptime
+    end
+
+    def filesystems
+        fs  = []
+
+        Filesystem.mounts.each\
+        {|member|
+            fs << {
+                      :mount_name  => member.name, 
+                      :mount_type  => member.mount_type,
+                      :mount_point => member.mount_point,
+                  }
+        }
+
+        OUTPUT.debug('Filesystem data: ' + fs.inspect)
+        fs
+    end
+
+    def network
+        network = Network.new.all
+        OUTPUT.debug('Network data: ' + network.inspect)
+
+        network
+    end
+
+    def memory
+        memory  = nil
+
+        unless File.stat(MEMINFO).nil?
+            begin 
+                memory = Hash[                               # see last step
+                             File.open(MEMINFO).             # open /proc/meminfo  
+                                  read.                      # read it into memory and
+                                  chomp.                     # chomp trailing record separator (usually \n)
+                                  split(/\n/).               # return lines split by new lines
+                                  map{|line|                 # for each line, assign it as variable called "line"
+                                      line.gsub!(/\s+/,'')   # global substitute all spaces with ''
+                                                             # then split into pairs delimited by ':'
+                                                             # and assign the left side as key and the right as value
+                                      key,value = line.split(/:/) 
+  
+                                      if key =~ /[a-z][A-Z]/ # if key is camel-humped then put space in front
+                                                             # of capped letter (next line)
+                                          key.gsub!(/([a-z])([A-Z])/,'\\1_\\2')
+                                      end
+  
+                                      key.downcase!          # lower case the key
+  
+                                                             # if key is "hugepages_size" then rename it.
+                                      key.eql?('hugepagesize') && key = 'huge_page_size'
+                                                             
+                                                             # make keyword(blah) like keyword_blah
+                                      key =~ /\(/ && key.gsub!('(','_').gsub!(/\)/,'')
+  
+                                      [key,value]            # make the resultant value (array)
+                                  }                          # return the array of (key,value)
+                             ]                               # and Hash[] enumerates each array into a keyed index.
+            rescue => e
+                OUTPUT.warn(memory = 'Unable to read ' + MEMINFO + ': ' + e.exception.to_s)
+            end
+        else
+            memory = meminfo + ' does not exist on this system.'
+        end
+
+        OUTPUT.debug('Memory data: ' + memory.inspect)
+        memory
+    end
+
+    private
+    def _humanize(secs)
+        [[60, :seconds], [60, :minutes], [24, :hours], [1000, :days]].map\
+        { |count, name|
+            if secs > 0
+                secs, n = secs.divmod(count)
+                "#{n.to_i} #{name}"
+            end
+        }.compact.reverse.join(' ')
+    end
+end
+
+class HwHttpClient
+    attr_accessor :payload, :type, :uri, :response, :code, :http_body, :status
+    
+    def initialize(*args)
+# initialize response
+        @status  = false
+
+        unless args.nil? or args.count == 0
+            @uri = URI.parse(args[0][:uri])
+        end
+
+# Ping first and see that the server is up.
+#        unless self.ping
+#            raise 'Server is not responding to ping.'
+#        end
+    end
+
+    def payload(payload)
+        @payload = payload unless payload.nil?
+    end
+
+# make it a class method instance of an instance method
+    def self.ping
+        @uri = URI.parse(@uri + '/Ping')
+        get
+    end
+
+    def post(args = {})
+        method     = __method__.to_s
+        #payloaderr = 'WARNING: post data payload was empty.'
+
+        if args.nil? or args.count == 0
+#            if @payload.nil?
+#                $stderr.puts payloaderr
+#            end
+        else
+            if args[:payload].nil? and @payload.nil?
+                OUTPUT.warn(payloaderr)
+            end
+
+            if args[:payload]
+                @payload = args[:payload]
+            end
+
+            unless args[:location].nil?
+                @uri = URI.parse(args[:location])
+            end
+        end
+
+        OUTPUT.debug("\n" +
+                     ' > Using URI: ' + @uri.inspect + "\n" + 
+                     ' - Scheme: '    + @uri.scheme.to_s + "\n" + 
+                     ' - Host: '      + @uri.host.to_s + "\n" +
+                     ' - Port: '      + @uri.port.to_s + "\n" +
+                     ' - Path: '      + @uri.path.to_s)
+
+        _http_client(method)
+    end
+
+    def get
+        method = __method__.to_s
+        _http_client(method)
+    end
+
+    private
+    def _http_client(method = 'get', location = nil, limit = 10)
+        raise ArgumentError, 'Too many HTTP redirects' if limit == 0
+        response = nil
+
+        if location.nil?
+            if @uri.nil?
+                raise ArgumentError 'FATAL: no location specified. Quitting.'
+            end
+        else
+            @uri = URI.parse(location)
+        end
+
+        client = Net::HTTP.new(@uri.host,@uri.port)
+        client.open_timeout    = $TIMEOUT # in seconds
+        client.read_timeout    = $TIMEOUT # in seconds
+        initheader             = {
+                                  'content-type' => 'application/json',
+                                  'accept'       => 'application/json',
+                                  'connection'   => 'keep-alive'      ,
+                                  'user-agent'   => UA                ,
+                                 }
+        #client.set_debug_output $stderr # XXX TEMPORARY
+
+        if @uri.scheme == 'https'
+            client.use_ssl     = true
+            client.verify_mode = 0
+        end
+
+        if method == 'post'
+            serialized = JSON.generate({:data => @payload})
+
+            begin
+                response   = client.post(@uri.path,serialized,initheader)
+            rescue => e
+                OUTPUT.fatal('Unable to contact remote server POST request: ' + e.exception.to_s)
+                exit 3
+            end
+        end
+
+# Only intended for pings. In order to do
+# full GETs (including query_params) this
+# will need to be refactored a little.
+        if method == 'get'
+            begin
+                response = client.get(@uri.path)
+            rescue => e
+                OUTPUT.fatal('Unable to contact remote server for GET request: ' + e.exception.to_s)
+                exit 4
+            end
+        end
+        
+        OUTPUT.debug(' - response from server: ' + response.inspect)
+
+        case response
+            when Net::HTTPSuccess
+                @status = true
+
+                unless response.body.nil? or response.body == ''
+                    app_response = JSON.parse(response.body)
+
+                    #$stderr.puts 'Response from server application was: ' + app_response.status
+
+                    if ( app_response.status == 'FAIL' )
+                        OUTPUT.warn('Server-side application error received: ' +
+                                    '(INFO ONLY) ERROR: ' + app_response.error)
+
+                        @status = false
+                    end
+                end
+            when Net::HTTPMovedPermanently
+                new_location = response['location']
+                limit        = limit - 1
+
+                OUTPUT.debug('Server redirected request to ' + new_location.to_s + 
+                             " this redirect count:  (10 - #{limit})")
+
+                @status = false
+                _http_client(method,response['location'],limit)
+            when Net::HTTPClientError
+                OUTPUT.warn('Client side response from http stack occurred. ' +
+                            'Server response code was: ' + response.code)
+                @status = false
+            when Net::HTTPServerError
+                OUTPUT.warn('Server side error occurred. Server response code was: ' + response.code)
+                @status = false
+            else
+                OUTPUT.warn('No idea what the server returned.')
+                @status = false
+        end
+
+        unless response.nil?
+            @response  = {:code => response.code, :body => (response.body || 'OK')}
+            @code      = @response[:code].to_s
+            @http_body = @response[:body].to_s
+        else
+            OUTPUT.warn('response from server was empty. :(')
+        end
+
+        _send_status
+    end
+
+    def _send_status
+        unless @status.nil?
+            case @status
+                when 1
+                    true
+                when 'OK'
+                    true
+                when 0
+                    false
+            end
+
+            @status
+        end
+    end 
+end
+
+# ******** Now all of the actual runtime stuff *********
+
+unless Process.uid == 0
+    OUTPUT.fatal 'Sorry. I need to be run by root.'
+    exit 100
+end
+
+environment     = Environment.new
+device          = Device.new(environment)
+hardware        = Hardware.new(environment)
+when_to_kickoff = Time.new + (60 * rand(0 .. environment.options.fuzz_factor))
+
+device_id_encd  = device.id.encode
+path            = '/device/thinclient/'+device_id_encd+'/update'
+web_client      = HwHttpClient.new(:uri => environment.endpoint + path)
+
+OUTPUT.info('Gathered device info for: ' + device.id)
+
+# try not to pollute production DB with dev data...
+unless environment.whid.nil?
+    whid = environment.whid
+    OUTPUT.debug('   discovered whid is: ' + whid.inspect)
+
+    if whid =~ /BFE/ or whid =~ /SEA|YYZ10/
+        OUTPUT.debug('   whid appears to be a development location.')
+
+        unless environment.stage.nil?
+            OUTPUT.debug('   Running stage is: ' + environment.stage.inspect)
+
+            if environment.stage =~ /prod/
+                OUTPUT.fatal('   Quitting. Attempting to run this ' +
+                             'in dev environment against production ' +
+                             'database is discouraged.')
+                exit 10
+            end
+        end
+    end
+else
+    OUTPUT.fatal('   Unable to determine environment. Run with --environment (see -h)')
+end
+
+all_data = []
+
+while true
+    unless environment.options.exec_now
+        now  = Time.new
+
+        OUTPUT.debug('Waiting to execute -- fuzz factor was: ' + 
+                      environment.options.fuzz_factor.inspect + ' mins')
+        OUTPUT.debug('  time to kickoff is: ' + when_to_kickoff.inspect)
+        OUTPUT.debug('  now is: ' + now.inspect)
+
+        if now <= when_to_kickoff
+            OUTPUT.debug('    sleeping for 10 seconds.')
+            sleep 10
+            next
+        end
+    end
+
+    OUTPUT.debug('  - Device check in to remote server...')
+    device.checkin unless environment.options.dryrun
+
+    OUTPUT.info('   - Gathering...')
+    %w[system_env cmdline].each\
+    {|e|
+        all_data << {"#{e}" => environment.send(e)}
+
+        finished = '[  DONE  ]'
+        message  = "\t\t%s data: " % "#{e}"
+        msgsize  = message.size
+        width    = (55 - (msgsize + finished.size)).to_s
+        OUTPUT.info("%s %#{width}s" % [message,finished])
+    }
+
+    %w[network dmi cpu uname uptime filesystems memory].each\
+    {|m|
+        all_data << {"#{m}" => hardware.send(m)}
+        finished = '[  DONE  ]'
+        message  = "\t\t%s data: " % "#{m}"
+        msgsize  = message.size
+        width    = (55 - (msgsize + finished.size)).to_s
+        OUTPUT.info("%s %#{width}s" % [message,finished])
+    }
+
+    unless environment.options.dryrun
+        OUTPUT.info('   - Updating FCAsset DB...')
+
+        ( web_client.post(:payload => all_data) ) ? status = true :
+                                                    status = false
+
+        ( status == true ) ? passfail = '[   OK   ]' :
+                             passfail = '[  FAIL  ]'
+        message = sprintf('   - Sending data... ')
+        msgsize = message.size
+        width   = (67 - (msgsize + passfail.size)).to_s
+
+        OUTPUT.info(sprintf("%s %#{width}s",message,passfail))
+    else
+        OUTPUT.info('   - WOULD BE sending FCAsset DB...')
+
+        passfail = '[  DONE  ]'
+
+        message = sprintf('   - hypothetical data send... ')
+        msgsize = message.size
+        width   = (67 - (msgsize + passfail.size)).to_s
+
+        OUTPUT.info(sprintf("%s %#{width}s",message,passfail))
+    end
+
+    break
+end

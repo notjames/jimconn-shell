@@ -1,0 +1,5 @@
+#!/bin/sh
+#rhost=u1c6f6507415a4f7a3008.ant.amazon.com
+rhost=jimconn-ubuntu.aka.amazon.com
+
+(ssh jimconn@$rhost -R 24800:localhost:24800 'killall synergyc 2>/dev/null && sleep 1 && /usr/bin/synergyc -f --debug DEBUG --name desktop localhost' > /dev/null 2>&1 &)

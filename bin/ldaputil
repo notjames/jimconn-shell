@@ -1,0 +1,2723 @@
+#!/usr/bin/perl -w
+# LdapJ.pm -- Generic functions for UCLA-Mathnet LDAP administration extensions.
+# Copyright (c) 2010 by The Regents of the University of California
+# Author: Jim Carter <jimc@math.ucla.edu>, 2010-05-27, perl-5.10.0
+
+# Command line options are shown with the Opt package, the first one below.
+
+# Test command lines: 
+# ./ldaputil -x -h localhost -d 0174 -c ./networks.ldif |& tee $j/errs | less
+# ./ldaputil -y $j/root.secret -h localhost -d 0174 -i ./networks.ldif | & tee $j/errs | less
+# ./ldaputil -Y GSSAPI -h localhost -d 0174 -i ./networks.ldif -n | & tee $j/errs | less
+# slapcat -l $j/all.ldif 
+
+# When you try to STARTTLS and the client library reports "unsupported extended
+# operation", this means that the server has not been configured with a host
+# certificate and secret key, or for some other reason doesn't intend to do
+# TLS.
+
+# Problems:
+#   X	OU's of nisMapName=netgroup.byuser and nisMapName=netgroup.byhost
+#	can't be done by the generic subroutines.  Is this even relevant?
+#	I don't think we're using the list of NIS maps.
+#   %?	Have we got /etc/hosts working right?  What does it really expect
+#	for multiple IP per host?  [Supposedly correct now]  [Presently there
+#	are no hosts with multiple IPs on Mathnet, but IPv6 changes that.]
+#   %	Need to deal with the whole issue of udata.  Need to add it to schema.
+#   %	Also need to add hostgroup table.
+#   %	Migration tools include OUs for mounts automount fstab.  We need
+#	auto.home and auto.master.  Are we going to have automount tables?
+#	Yes, we need to add these.
+#   X	-O is used here for Organizational Unit, but also for SASL security
+#	properties.  And -U is for SASL authentication ID.  Straighten this
+#	out.  [Punt, not using Security Properties.]
+#   .	Comparing password in shadow: LDAP has (or had) {SSHA}QWERTY... while
+#	flat file has $2a$10$2345678...  Avoid comparing apples and oranges.
+#	It wanted to modify every entry, prob. identity transformation.
+#	But root and testacct had $2a$10$ in both flat and LDAP.
+#   .	GSSAPI has become broken.  Message: "Failed to bind to LDAP server 
+#	as...  Unknown parameter to auth callback."  Specifying -U doesn't
+#	help (default is $ENV{USER}).  Omitting auth callback makes it revert
+#	to "unknown parameter to user callback".  Omitting both produces
+#	"invalid connection parameter".  (Presumably no user ID at all.)
+#   .	SASL/GSSAPI sets up 56 bit security, but the (hashed) password is only 
+#	revealed with ssf >= 128 bits.  Web info suggests (but I don't take it
+#	as authoritative) that SSL/GSSAPI can't set higher than 56 bits, and
+#	if you want more, you need to do TLS before GSSAPI.  
+#   X	A user is present in passwd but not shadow.  Updating shadow, kills
+#	the whole record.  Users: rtkit testacct .  Disposition: don't do that.
+
+# Test Matrix -- Output, or for -c, 2nd input 
+# Input		flat		LDIF		LDAP(empty)	LDAP(full)
+# flat		--		OK (incl -a)	*
+# LDIF		OK		--
+# LDAP(full)
+# -c flat					OK
+# -c LDIF					OK
+# -c LDAP (impossible)
+
+# $Header: /src/math/etc/ldap/RCS/ldaputil,v 1.2 2011/03/05 05:49:04 jimc Exp jimc $
+
+# $Log: ldaputil,v $
+# Revision 1.2  2011/03/05 05:49:04  jimc
+# Added format presets to handle udata, hostgroup, netgroup, auto_home.
+# Input lines ending with backslash newline (as in netgroup) are joined.
+# Added dynamic field type selection (as in netgroup).
+#
+# Revision 1.1  2010/08/16 18:06:03  jimc
+# Initial revision
+#
+
+
+use strict;
+
+package Barf;		# Forward reference
+package Attrconv;	# Forward reference
+
+# ======
+package Opt;
+# This package is used by LDAP utility scripts that all use a common set of
+# command line arguments.  Some defaults are taken from ldap.conf and friends;
+# see Opt::default() for all the anally retentive override possibilities.
+#   -i file     Input data is read from a UNIX directory file of this name, 
+#		such as /etc/passwd or /etc/master/passwd.new .
+#		'-' designates standard input (or output, for -o).  If the 
+#		filename has an extension of .ldif then it is interpreted as
+#		LDIF format (but see -L).  If -i is absent then input data 
+#		comes from the LDAP table.  
+#   -o file     Similar to -i except this file is written on.  
+#   -c file	Similar to -i except the activity is to read the -c and -i
+#		datastreams and report discrepancies.  When -c is absent the
+#		activity is to read -i and write the content onto -o.  With
+#		-c and not -i, the -c file is compared with the LDAP table. 
+#   -L ioc	The argument is a set of bytes i, o or c.  These are 
+#		interpreted as LDIF whatever the filename's extension.  This is
+#		required if standard input/output is involved since the 
+#		filename of '-' lacks the extension.  
+#   -a		Include the realm containers (otherwise they are assumed to
+#		exist but are not checked).
+#   -k		When modifying the LDAP table, remove all entries not in the
+#		input file (otherwise extra entries are left alone).  Do not
+#		specify if output is to a file.  
+#   -B		Bail out after the first error (failure to update an entry).
+#		For debugging.
+#   -f filetype Semantics of the UNIX directory file involved, in the form of
+#		the file's basename.  The defalt is inferred from the actual
+#		filename (from -i -o or -c), e.g. "/etc/master/passwd.new"
+#		would turn into "passwd".  Many of the following arguments have
+#		defaults that are a function of the -f value.
+#   -F fmt      The flat file being handled has this format.  The value is a
+#		sequence of LDAP attribute (field) names separated by the
+#		authentic separators in the plain file (and flags).  See
+#		package FlatFormat for the flags.  Default per -f.
+#   -t class	A space separated list of objectClass value(s) to go into the
+#		entries.  Default per -f.
+#   -O ou	Pseudo-organizational-unit used in the Distinguished Names of
+#		the table entries.  Default per -f.  
+#   -v		Verbose output.  Mainly, prints statistics at the end.
+#   -q		Quiet (no output except on errors).  Without -q it prints
+#		a 1-line summary of statistics.  
+#   -n		LDAP tables are not changed.  But the -o file (if any) is
+#		still written.  
+#   -d N	Turn on debugging messages.  N is an integer (sum of bits)
+#		specifying which messages are wanted; see below for values.  
+# The following options are generally similar to those in the LDAP utilities:
+#   -b DN       This Distinguished Name (e.g. ou=People,dc=example,dc=com) is a
+#		container for the LDAP table per -f, to be matched with records
+#		in the flat file.  The default is the -O value followed by DC's
+#		from the BASE parameter in ldap.conf.
+# The defaults for the host and port are found in /etc/openldap/ldap.conf.
+#   -H URI	Space separated list of LDAP URI(s) for the server(s) to use. 
+#   -h host	Host where the server is located.  (Use only one of -H or -h.)
+#		In the likely case that TLS is used (-Z) the hostname in -h or
+#		-H must match that in the server's certificate (normally the
+#		FQDN, sometimes a particular CNAME) or it will be rejected.
+#   -p port	Port that the server is on.
+#   -Z		Require TLS (using StartTLS command).  We don't use -ZZ; TLS
+#		either is not used or is required.  -Z is on by default 
+#		whenever there is a password for simple authentication.  
+#   -x		Use simple authentication (vs. SASL).
+# The following are only for simple authentication.
+#   -D DN       Bind using this Distinguished Name. If -D is omitted, the
+#		program will bind anonymously.  Default is BINDDN in ldap.conf
+#		or (more normally) ~/.ldaprc .
+#   -W		Prompt on /dev/tty for the password.
+#   -w passwd	Put your password on the command line so everyone can see it.
+#		Extension: default from BINDPW in ldap.conf. 
+#   -y file	The password is read from this file.  Extension: default from
+#		BINDPWFILE in ldap.conf.  Use only one of -w or -y.  
+# The following are only for SASL authentication.  
+#   -O secprop	SASL security properties.  (Not actually honored, see -O OU).
+#   -Y mech	SASL mechanism.
+#   -R realm	Realm (Not actually honored).
+#   -U user	Authentication ID (default from USER environment variable).
+#   -X user	Authorization ID (default is same as authentication ID).
+
+# The configuration file(s) have key value pairs which are saved in $opt.
+# Keys are case insensitive and are converted to lower case in this program. 
+# See Opt::default for the names of the various configuration file 
+# possibilities.
+
+# $opt->{errcode} is a global error code which ends up as the exit code of
+# the program; it is a sum of these bits:
+#	0	no error was found
+#	1	some entries were unequal (only set with -c)
+#	2	write failures, e.g. server rejected an update
+#	4	bad input data
+#	8	other errors that prevent startup
+
+# Debug bits:  Add these to give the value for the -d option.
+#   1		Program forces this to 0 (kill bit)
+#   2		Program forces this to 1 (for non-debug output)
+#   4		Whatever we're currently debugging
+#   8	010	Important intermediate values; show options being used
+#   16	020	Entry and exit from major subroutines
+#   32	040	Show each Entry affected by the program (bypass irrelevant ones)
+#   64	0100	Show each Entry read and written including irrelevant ones
+
+# The Opt object is a hash keyed by the switch letters.  There is only one
+# per program execution.  Other packages often import it into their address
+# space with this motif ("our" is not needed):
+#   BEGIN { *opt = \$Opt::opt; }
+# Other packages may preset options with a motif like:
+#   BEGIN { $Opt::opt->{x} = "value"; }
+our $opt; BEGIN { $opt = bless({ }, "Opt"); }
+
+# Other packages may want to monkey with default arguments.  They should
+# append to @defaults a callback using this motif:
+#   BEGIN { push(@Opt::defaults, "Class", \&subrt); }
+# $class->$subrt() will be called (just the class argument, static member
+# function).  If OK it should return 1; or print a message (not die) and return
+# 0.  
+our @defaults;
+
+use Getopt::Std;
+
+BEGIN { *barf = \&Barf::barf; }
+our $conv; BEGIN {
+    #$conv = Attrconv->new();
+    $conv = bless({ }, 'Attrconv');	# Gross perversion of modularity
+    %$conv = ( d => { 
+	in  => \&Barf::dbconv,
+	out => sub { sprintf "0%o", $_[0]; },
+	} );
+}
+
+# "Constructor".  Arguments:
+#   $class	Name of class (Opt)
+#   K=>val	0 or more key-value pairs used to preset default option values.
+#   Returns	Ref. to the Opt object hash.
+sub new {	#Opt
+    my($class) = splice(@_, 0, 1);
+		# Copy preset defaults into the pre-existing Opt object.
+    my($k, $v);
+    while (($k, $v) = splice(@_, 0, 2)) {
+	$opt->{$k} = $v;
+    }
+		# Analyse the command line options.
+    getopts("i:o:c:L:akBf:F:t:vqnd:b:H:h:p:ZxD:Ww:y:O:Y:R:U:X:", $opt) 
+	or die "Invalid command line option(s)\n";
+    $conv->convhash($opt, 'in');	# Immediately convert the format.
+		# Set default arguments of interest to various packages,
+		# including reading configuration options into $opt.
+    my $ok = 1;
+    my ($dclass, $subrt);
+    while (($dclass, $subrt) = splice(@defaults, 0, 2)) {
+	barf(020, "Opt->new calls %s initialization ( -d 0%o )\n", 
+	    $dclass, ($opt->{d} || 0));
+	$ok &&= $dclass->$subrt();
+    }
+    barf(8, sub { "Opt->new is using these options:\n%s", $opt->as_string() });
+    barf(3, "Initialization error, exiting.\n") unless $ok;
+    $opt;
+}
+
+# Produces a string showing the options, for debugging.  Args:
+#   $this	Class object ref.
+#   Returns	A string.  
+sub as_string {	#Opt
+    my($this) = @_;
+    my $str = '';
+    foreach my $k (sort keys %$this) {
+	my $v = $this->{$k};
+	$v = '[' . join(' ', @$v) . ']' if ref($v);
+	$v = $conv->conv($k, 'out', $v);
+	$str .= sprintf("%-4s %s\n", $k, $v);
+    }
+    $str;
+}
+
+# Call this static member function to read ldap.conf and friends.  
+sub default {	#Opt
+    my($class) = @_;
+    my $rc = 1;				# The eventual return value
+    $opt->{errcode} = 0;		# Program return code
+    my $cmdline = { %$opt };		# Save explicit command line options
+		# Read the client configuration files.  Technically, all are
+		# optional.  A value in later files overrides earlier.  See
+		# the man page for ldap.conf for all the anally retentive
+		# variables and overrides.  Command line options override
+		# all others.  
+		# File format: key value, # begins a comment.  Keys are case
+		# insensitive and are stored in $opt in lower case.  (Command
+		# line switch letters are case sensitive.)
+    my @fnames = ("/etc/openldap/ldap.conf", "$ENV{HOME}/.ldaprc", 
+	"$ENV{HOME}/ldaprc", "./ldaprc");
+    my($key, $val);
+    push(@fnames, $ENV{LDAPCONF}) if $ENV{LDAPCONF};
+    push(@fnames, "$ENV{HOME}/.$ENV{LDAPRC}", 
+	    "$ENV{HOME}/$ENV{LDAPRC}", "./$ENV{LDAPRC}") if $ENV{LDAPRC};
+    undef @fnames if $ENV{LDAPNOINIT};	# You can bypass all client conf files
+    my @ldapconf;			# Names of config files actually read
+    foreach my $fname (@fnames) {
+	my $FD = FileHandle->new($fname) or next;
+	push(@ldapconf, $fname);
+	while (<$FD>) {
+	    next if /^\s*(:?\#|$)/;	# Toss comments and blank lines.
+	    chomp;
+	    ($key, $val) = split(' ', $_, 2);
+	    $key = lc($key);
+	    $opt->{$key} = $conv->conv($key, 'in', $val);
+	}
+    }
+    $opt->{conf} = \@ldapconf;
+		# An environment variable LDAP$PARM sets that parameter.
+		# Keys are lower case (case insensitive).  
+    while (($key, $val) = each %ENV) {
+	next unless substr($key,0,4) eq 'LDAP';
+	$key = lc($key);
+	$opt->{substr($key,4)} = $conv->conv($key, 'in', $val) 
+    }
+		# Command line options override the configuration file.
+		# (Format already converted.)  (Command line switch letters
+		# are case sensitive.)
+    foreach $key (keys %$cmdline) {
+	$opt->{$key} = $cmdline->{$key};
+    }
+		# Infer the BASE from other parameters if not explicit.  
+    BASE: {
+	last if $opt->{base};		# Already know BASE
+	if ($opt->{b}) {		# Infer BASE from -b if given.
+	    ($opt->{base} = $opt->{b}) =~ s/ou=[^,]*,//;
+	    last;
+	}
+	$opt->{base} = "dc=missing";
+	barf(2, "Realm (query BASE) can't be determined from either -b or %s, (not) using %s\n",
+	    join(' ', @ldapconf), $opt->{base});
+	$rc = 0;
+    }
+    $rc;
+}
+BEGIN { push(@Opt::defaults, 'Opt', \&default); }
+
+# ======
+package Barf;
+
+BEGIN { *opt = \$Opt::opt; }
+
+# Prints an error message on stderr.  Call as: 
+#   &Barf::barf(3, "Error code %d (fatal)\n", $code);
+# You can import barf into your namespace like this:
+#   BEGIN { *barf = \&Barf::barf; }
+# Args:
+#   $flags	This is "anded" with the debug option ($opt->{d}) and if the
+#		result is nonzero the message is printed.  Special cases:
+#		1   Exit (die) after showing the error message.  Also set bit
+#		    2 if you set bit 1.
+#		2   Provide this bit for non-debug messages to be printed
+#		    unconditionally.
+#   $format	A format string for sprintf (or could be the whole message).
+#		Alternatively it can be a code ref. which produces (in list
+#		context) the format and values.  This is called only if the
+#		message is to be printed, i.e. the debug switch is on.  This
+#		saves the work of creating and throwing away the values when
+#		not debugging.  Example: 
+#		    barf(4, sub { "%d: %s = %s\n", $lno, $key, $value });
+#   @values	Values to be substituted by sprintf, if any.
+#   Returns	Always undef, so you could do:
+#		return barf(2, "Message\n") if $bad;
+sub barf {	#Barf
+    my $flags = shift @_;
+    return undef unless ($flags & $opt->{d});
+    my ($format, @vals) = @_;	# Format must be a scalar separate from values
+		# For debug messages, you can send in a subroutine that emits
+		# the format and values.
+    if (ref($format)) {
+	($format, @vals) = &{$format}();
+    }
+    printf STDERR $format, @vals;
+    exit 8 if $flags & 1;
+    undef;
+}
+
+# Easy debug printout of variables.  Args:
+#   $flags	First argument of barf()
+#   $msg	Initial part of message.  Or it can be a code ref. which 
+#		returns the initial message and the label-value pairs. 
+#   label => $value	Key-value pairs.  Labels are printed, then their value.
+#   Returns	What barf returns.
+sub barflabel {	#Barf
+    my($flags, $msg, @keyval) = @_;
+    return undef unless ($flags & $opt->{d});
+    if (ref($msg)) {
+	($msg, @keyval) = &{$msg}();
+    }
+    my (@vals, $label, $v);
+    while (($label, $v) = splice(@keyval, 0, 2)) {
+	$msg .= "  $label %s";
+	push(@vals, (!defined($v) ? 'undef' : ($v eq '') ? "''" : $v));
+    }
+    $msg .= "\n";
+    barf($flags, $msg, @vals);
+}
+
+# Conversion subroutine for the debug option, for use with Attrconv.
+# Arg: external representation of -d value.  Returns internal representation.
+sub dbconv {	#Barf
+    my($d) = @_;
+    $d = '0' unless $d;
+    $d = oct($d) if substr($d,0,1) eq '0';
+    $d &= ~1;			# Idiotproof bogus setting of "die" bit
+    $d |= 2;			# Bit is always on for non-debug messages
+    $d;				# This is the internal representation (integer).
+}
+
+# Initialization features:
+sub default {	#Barf
+    my($class) = @_;
+    $| = 1 if $opt->{d} & ~3;	# Line buffer stdout if debugging
+    barf(020, "Barf initialization ( -d %0o)\n", $opt->{d});
+    1;				# This subroutine always succeeds
+}
+BEGIN {
+    $opt->{d} = 0;		# Make sure debug value isn't undef
+		# Best to initialize Barf first.
+    unshift(@Opt::defaults, 'Barf', \&default);
+}
+
+# ======
+package Attrconv;
+# For converting attributes according to special formats.  The class object
+# is a hash whose keys are attribute names; each value is a hash ref. whose
+# keys signify the direction of conversion (unique for each client package),
+# and their values are code refs called with one argument, the value of the
+# attribute.  It should return the modified value suitable for output in the 
+# direction indicated.  
+
+# Since package Opt needs to use Attrconv, its conversion object can't be
+# initialized in a BEGIN block.  Client packages should construct a hash
+# ref as described above, and then push (a copy of) this ref. onto @initme
+# using this kind of motif:
+#	BEGIN { 
+#	    $conv = { userPassword => { flat => sub {...}, ldap => sub {...}} };
+#	    push(@Attrconv::initme, $conv);
+#	}
+# In principle the client package could just bless the hash itself, but that
+# radically violates modularity.  
+our @initme;
+
+# Constructor.  This is actually pro forma since Attrconv objects are only
+# constructed through the default() subroutine.
+sub new {	#Attrconv
+    bless({ }, $_[0]);
+}
+
+# Converts an attribute.  Args:
+#   $this	Class object ref.
+#   $attr	Name of the attribute
+#   $dir	Direction key (varies in each client package)
+#   $val	The value to be converted
+#   Returns	The converted value; in the usual case that no conversion
+#		subroutine is found in $this, $val is returned unchanged.
+sub conv {	#Attrconv
+    my($this, $attr, $dir, $val) = @_;
+    my $atrh = $this->{$attr};		# Hash keyed by attribute name
+    my $sub = ($atrh ? $atrh->{$dir} : undef) || sub { $_[0]; };
+    &{$sub}($val);
+}
+
+# Converts a list of attributes.  Args:
+#   $this	Class object ref.
+#   $attr	Name of the attribute
+#   $dir	Direction key (varies in each client package)
+#   \@val	Ref. to a list of values to be converted
+#   Returns	List of converted values; in the usual case that no conversion
+#		subroutine is found in $this, @$val is returned unchanged.
+sub convlist {	#Attrconv
+    my($this, $attr, $dir, $val) = @_;
+    my $atrh = $this->{$attr};
+    my $sub = ($atrh ? $atrh->{$dir} : undef) || sub { $_[0]; };
+    map {&{$sub}($_)} @$val;
+}
+
+# Converts all attributes in a hash.  Args:
+#   $this	Class object ref.
+#   \%hash	Hash whose values are to be converted.
+#   $dir	Direction key (varies in each client package).
+#   Returns	Nothing (%hash values are converted).
+sub convhash {	#Attrconv
+    my($this, $hash, $dir) = @_;
+    foreach my $k (keys %$hash) {
+	my $atrh = $this->{$k} or next;		# Hash keyed by attribute name
+	my $sub = $atrh->{$dir} or next;
+	$hash->{$k} = &{$sub}($hash->{$k});
+    }
+}
+
+# The client packages have made a list of Attrconv objects on @initme.
+# This subroutine blesses them into the package.
+sub default {	#Attrconv
+    my($class) = @_;
+    foreach my $obj (@initme) {
+	bless($obj, $class);
+    }
+    1;
+}
+# Has to init the Attrconv objects before Opt::default tries to use it.
+BEGIN { unshift(@Opt::defaults, 'Attrconv', \&default); }
+
+# ======
+package FlatFormat;
+# This object describes the transformation between a flat file and a LDAP
+# Entry.  It is a hash with these members:
+#   format	The format string (for debugging).
+#   fields	Ref. to an array of attribute names in the order they occur in 
+#		the flat file.  In one bizarre case the same field occurs 
+#		twice in the flat file, and in another, one flat field feeds
+#		into two Entry attributes.  In the latter case an arbitrary
+#		one is chosen as the "real" field name.  
+#   attrs	Ref. to list of attributes in the Entry, with objectClass
+#		added synthetically.  
+#   regexp	A regexp object which will split a line into these fields.
+#   splitre	Present only if the last field is repeated.  It extracts the
+#		field values.  
+#   prikey	The name of the primary key field.
+#   PF          Hash keyed by attribute names.  Each attribute name has a
+#		member, including multiple attributes per field and including
+#		pseudo-attributes excluded by the 'x' flag.  Do not use "keys
+#		%{$this->{PF}}" to get a list of field names, since something
+#		looks for domain container fields and creates extraneous empty
+#		hashes.  Values are hashes with these members:
+#		sep	The separator for output, to follow the field, as text
+#		rsep	Trailing separator as regexp
+#		psep	The preceeding separator, as text
+#		rpsep	Preceeding separator as regexp
+#		index	Subscript in field list of this field (0 origin).
+#		attrs	Ref. to list of attribute names (usually exactly 1)
+#			whose values come from this field.  
+#		dflt	Value to be used if the field is null.  Usually ''.
+#		wid	Field width, pad with whitespace on output.
+#		<flag>	Key is a flag byte (e.g. 'r') and value is 1 if that
+#			flag is present.
+#		split	Only if the field is split, this is another PF hash for
+#			the properties of the second instance.  
+#   base	Distinguished Name of the container within which the Entry
+#		lives.  
+#   oclass	Ref. to array of objectClass attributes to set in the entry.
+#   fclass	Name of format (normally, basename of UNIX directory file)
+
+# Format of the format string: It is a sequence of units, each of which is a
+# slash-separated list of field names (attributes as used in the Entry), then
+# (flags) in parens (optional), then =default (optional), then a
+# non-alphanumeric separator.
+#   .	The first field must always start at the beginning of the record.
+#	No leading whitespace.
+#   .   The first section of the unit is a list of attribute names, usually
+#	only one, separated by '|'.  The first is the official name of the
+#	field, but the same value is stuffed in the resulting Entry under each
+#	of the attribute names.
+#   .	The separator after the last existing field is not written and is
+#	not required on input.  Nonetheless it must appear in the format.
+#   .	Before the separator could be a set of letters in (parens), which are
+#	processing flags.  These are removed, that is, not written, not 
+#	expected on input.  Flag letter interpretations:
+#	r   Field may be repeated more than once.  Last field only.  This
+#	    field's separator comes after each instance except the last. 
+#	o   Field is optional, i.e. no content and preceeding separator may 
+#	    or may not be missing.  Put 'o' on contiguous trailing fields. 
+#	N   Field must not be '' (and must not be missing).  If it is, the 
+#	    record is tossed.  
+#	q   Field may include quoted strings (quotes are preserved).  For 
+#	    mail aliases.
+#	x   Field doesn't go in the Entry and on output its value is ''.
+#	s   Field is split: first value goes in the nonrepeated field and the
+#	    rest is in the repeated instance.  Put on both instances.  Used
+#	    in /etc/rpc.  
+#	k   This is the primary key (RDN).  In case there are multiple 
+#	    attributes in the field name, the first is the primary key 
+#	    attribute name, e.g. uid/cn results in a DN of uid=joeluser.
+#   	U   Take the union of all the multiple rows with the same primary key.
+#	    Put this flag on the primary key field.
+#	u   When taking the union, fields with this flag are allowed to have
+#	    multiple values; others are just replaced.  
+#   	E   Multiple tables share the same DN, don't freak out.  Example:
+#	    passwd and shadow.
+#   	\d+ The last "flag" may be a number which is the field width.  On 
+#	    output the field is padded to this width with blanks or tabs. 
+#	    Value is 0 if not specified.  
+#   .   After (flags) is (optionally) '=' followed by alphanumerics or
+#	hyphen, which gives a default value.  Just '=' is legal (value is '')
+#	but useless.
+#   .	On output the separators are emitted as written.
+#   .   On input, wherever whitespace appears in the separator, any number
+#	(including 0) of any kind of whitespace bytes may appear in the record,
+#	except if the first separator byte is whitespace, at least one such
+#	byte is required.
+
+use Net::LDAP::Entry;
+
+# Presets for the various standard file types.  Key is the -f value, e.g.
+# passwd or group, which normally would be the basename of the flat file.  
+# Value hashes are arguments for FlatFormat->new() and have these members:
+#	f	Format class, copy of the key (-f value)
+#	O	Pseudo-organizational-unit, last component of realm containers
+#	t	Space separated list of objectClass values to go in the Entry.
+#		If an object comes from multiple sources (e.g. passwd, shadow
+#		-> People), include all its objectClasses with each source.
+#	F	Format string, see above for its format
+#	C	Cleanup subroutine, a code ref.  If present it sanitizes the 
+#		input line before it is split for fields.  /etc/rpc has a
+#		trailing comment feature which is very troublesome. 
+#		If the return value is undef, the line should be tossed 
+#		silently.
+#	A	Type subroutine, maps the sequential index (0 origin) of a
+#		field to the index in FlatFormat->{fields}.  Args: Ref to 
+#		FlatFormat object, ref. to array of field values, index of 
+#		field.  The default is like this but simplified:
+#		sub { my($this, $data, $i) = @_; $i; }
+#		Netgroup needs this for its bizarre polymorphic format. 
+#		
+our %preset; BEGIN {
+    %preset = (
+	passwd => {
+		f => 'passwd',
+		O => 'People',
+		t => 'top account posixAccount shadowAccount mathUdata',
+		F => 'uid|cn(kE):pw(x):uidNumber(N):gidNumber(N):gecos:homeDirectory(o):loginShell(o) ',
+	    },
+		    # The auto_home map is derived from passwd but specially.
+		    # Set -f auto_home -i /etc/passwd
+	auto_home => {
+		f => 'auto_home',
+		O => 'Auto_home',
+		t => 'top automount',
+		F => 'automountKey(k) automountInformation(N) ',
+		    # Expects the homedir to be like /u/$HOST/rest/of/path
+		    # and returns $USER (tab) $HOST:/rest/of/path
+		    # or undef if it doesn't see the /u/, killing the line.
+		C => sub {
+			my @line = split(/:/, $_[0]);
+			if ($line[5]  =~ m|^/u/(\w+)/(.+)|) {
+			    $_[0] = "$line[0]\t${1}:/$2";
+			    return 1;
+			}
+			undef;
+		    },
+	    },
+	shadow => {
+		f => 'shadow',
+		O => 'People',
+		t => 'top account posixAccount shadowAccount mathUdata',
+		F => 'uid(kE):userPassword:shadowLastChange:shadowMin:shadowMax:shadowWarning:shadowInactive:shadowExpire:shadowFlag ',
+	    },
+	udata => {
+		f => 'udata',
+		O => 'People',
+		t => 'top account posixAccount shadowAccount mathUdata',
+		F => 'uid(kE):uidNumber(N):homeSite:mailSite:sponsor:siteGroup:discq:paperq:eDate ',
+	    },
+	group => {
+		f => 'group',
+		O => 'Group',
+		t => 'top posixGroup',
+		F => 'cn(k):userPassword:gidNumber(N):memberUid(ro),'
+	    },
+	aliases => {
+		f => 'aliases',
+		O => 'Aliases',
+		t => 'top nisMailAlias',
+		F => 'cn(k): rfc822MailMember(rNq), '
+	    },
+	rpc => {
+		f => 'rpc',
+		O => 'Rpc',
+		t => 'top oncRpc',
+			# The 3rd "field" contains additional cn's that are
+			# less equal than the first one, i.e. they don't
+			# get a separate DN, just being multiple values of the
+			# cn attribute.  Following those is optionally
+			# "# description". The program can't handle 2 optional 
+			# fields, so it gets tossed.
+		F => "cn(ks16)\toncRpcNumber(N) cn(rso) ",
+		C => sub { $_[0] =~ s/\s*#.*$//, 1 },
+	    },
+			# Example: whosockami 2009/udp; whosockami 2019/tcp
+			# whosockami is the RDN.  How are we supposed to deal
+			# with that?  Normally the cn and port are the same
+			# for multiple protocols, which are put out on separate
+			# lines in /etc/services.  
+			# More bad news: "whois++ 63/tcp" invalid chars in a DN.
+			# "sunrpc 111/tcp rpcbind": split primary key!
+			# We'll need to jettison the description, same as for
+			# /etc/rpc.  
+	services => {
+		f => 'services',
+		O => 'Services',
+		t => 'top ipService',
+		F => 'cn(kUus17) ipServicePort(N)/ipServiceProtocol(Nu) cn(ruso) ',
+		C => sub { $_[0] =~ s/\s*#.*$//, 1 },
+	    },
+	protocols => {
+		f => 'protocols',
+		O => 'Protocols',
+		t => 'top ipProtocol',
+		F => "cn(k16) ipProtocolNumber(N3) alias(x14) # description(o)#",
+	    },
+	networks => {
+		f => 'networks',
+		O => 'Networks',
+		t => 'top ipNetwork',
+			# According to the schema, the cn is optional and
+			# there are optional trailing fields possibly in this 
+			# order: netmask, l (whatever that is), description,
+			# manager.  The netmask comes from /etc/netmasks.
+		F => "cn(k16)\tipNetworkNumber(N) ",
+	    },
+			# A comment in the file says /etc/netmasks is a
+			# Solaris-ism, not existing on Linux.  Since the RDN
+			# does not appear, how are we supposed to stuff in
+			# the information?
+	netmasks => {
+		f => 'netmasks',
+		O => 'Networks',
+		t => 'top ipNetwork',
+		F => "ipNetworkNumber(N16)\tipNetmaskNumber(N) ",
+	    },
+	hosts => {
+		f => 'hosts',
+		O => 'Hosts',
+		t => 'top ipHost device',
+			# The first cn is the host's canonical name and is the
+			# RDN.  Other names don't have their own Entry and DN.
+			# It's normal for a host to have more than one 
+			# ipHostNumber (e.g. IPv4 and IPv6); each belongs on
+			# its own row in /etc/hosts.  
+		F => "ipHostNumber(Nu40)\tcn(kUur)\t",
+	    },
+			# Netgroup is a real nightmare: 3 OU's (ou=Netgroup,
+			# nisMapName=netgroup.byuser,nisMapName=netgroup.byhost)
+			# and a totally wacko format of the flat file.
+			# (I've lost track of where the OU's come from.)
+			# Flat file format has fields whitespace separated and
+			# long lines (which are common) joined by backslash
+			# newline.  First field is the Common Name (cn).
+			# After that you can have an identifier (sub-netgroup)
+			# or a triplet in parens.  The 1st subfield is the host,
+			# which is the only one ever used.
+	netgroup => {
+		f => 'netgroup',
+		O => 'Netgroup',
+		t => 'top nisNetgroup',
+		F => 'cn(k) nisNetgroupTriple(ro) memberNisNetgroup(ro) ',
+		A => sub {
+			my($this, $data, $i) = @_;
+			($i == 0) ? 0 : (substr($data,0,1) eq '(') ? 1 : 2; #\)
+		    },
+	    },
+			# Special table in mathnet.schema.  
+	hostgroup => {
+		f => 'hostgroup',
+		O => 'Hostgroup',
+		t => 'top mathHostGroup',
+		F => 'cn(kU) hostGroup(rou) ',
+	    },
+			# The following are container classes which may contain
+			# a table or levels of the realm, keyed by their main
+			# objectClass name.  From core.schema objectclass 
+			# definitions.  
+	domain => {
+		f => 'domain',
+		k => 'dc',
+		t => 'top domain',
+		F => 'dc(kN) ',
+	    },
+	organizationalUnit => {
+		f => 'organizationalUnit',
+		k => 'ou',
+		t => 'top organizationalUnit',
+		F => 'ou(kN) ',
+	    },
+	country => {
+		f => 'country',
+		k => 'c',
+		t => 'top country',
+		F => 'c(kN) ',
+	    },
+			# Somehow these two use the same objectClass for 
+			# different external semantics and different attributes.
+	locality => {
+		f => 'locality',
+		k => 'l',
+		t => 'top locality',
+		F => 'l(k) ',
+	    },
+	state => {
+		f => 'state',
+		k => 'st',
+		t => 'top locality',
+		F => 'st(k) ',
+	    },
+	);
+}
+
+# $ctnrs->{$attr}, e.g. $ctnrs{'dc'} is an Entry object stuffed with attributes
+# implementing the kind of toplevel container object which has that kind of
+# attribute, except the key attribute (e.g. 'dc') is not stuffed.  The 
+# Distinguished Name is also not stuffed.
+our(%ctnrs, %attr2obj, %obj2attr, %cache);
+BEGIN {
+    %attr2obj = qw(
+	dc	domain
+	ou	organizationalUnit
+	c	country
+	l	locality
+	st	state
+	);
+    %obj2attr = reverse %attr2obj;
+    my($attr, $ctnt);
+    while (($attr, $ctnt) = each %attr2obj) {
+	my $entry = $ctnrs{$attr} = Net::LDAP::Entry->new();	# Chgtype = add
+	$entry->add(objectClass => [ split(' ', $preset{$ctnt}->{t}) ]);
+    }
+}
+
+# A few attributes need special handling.  The attrconv hash keys are attribute
+# names, and the value is a sub-hash with keys of 'flat' or 'ldap'.  Their
+# value is a code ref (subroutine) which returns the attribute value as that
+# kind of file needs it, from an argument found in the other kind of file.  
+# "ldap' includes LDIF.
+our $conv; BEGIN {
+    $conv = {
+	userPassword	=> {
+	    flat	=> sub { my($v) = @_; $v =~ s/\{crypt\}//; $v; },
+	    ldap	=> sub { my($v) = @_; substr($v,0,0) = '{crypt}' if length($v) > 1; $v; },
+	},
+    };
+    push(@Attrconv::initme, $conv);	# Blesses $conv into class Attrconv
+}
+
+BEGIN { *barf = \&Barf::barf; }
+
+# Constructor.  Actually assembles the FlatFormat object to be put in the
+# cache.  Arguments:
+#   $class	Class name (FlatFormat).
+#   \%PS	Preset hash ref, with these members, defaults from 
+#		corresponding command line options or their defaults.
+#		F	Format as a string
+#		t	Space separated list of objectClass to go in the Entry
+#		f	Name of format class (basename of UNIX directory file)
+#		k	Primary key attribute (not used in this subrt)
+#		C	Cleanup subroutine (optional)
+#		A	Field index subroutine (optional)
+#   $base	The base Distinguished Name, as a string.
+#   Returns	New FlatFormat object
+sub new {	#Flatformat
+    my($class, $PS, $base) = @_;
+    my $fmt = $PS->{F};
+    my $this = bless({
+	format		=> $fmt,
+	base		=> $base,
+	fields		=> [ ],
+	#attrs		=> [ ],			# This is stored later
+	PF		=> { },
+	oclass		=> [ split(' ', $PS->{t}) ],
+	fclass		=> $PS->{f},
+	cleanup		=> $PS->{C} || sub { 1 }, # Does nothing, successfully
+	ixsub		=> $PS->{A} || sub { $_[2]; },
+	#regexp		=> qr(whatever),	# This is stored later
+	}, $class);
+    my $fields = $this->{fields};
+    my %attrs = qw(objectClass 1);
+    my $PF = $this->{PF};
+		# The description says the last separator is required, but
+		# idiotproof a missing separator anyway.
+    if ($fmt !~ /[^\w=()]$/) {
+	barf(2, "Warning, format for %s lacks ending separator, using one blank.\n", $opt->{f});
+	$fmt .= ' ';
+    }
+                # @units = field/name flags dflt separator, with an empty field
+		# name after the last separator.  The regexp in "split"
+		# produces these items: optional parenthesized flag letters,
+		# optional =default value, and required non-word chars, which
+		# are the separator.  The value of missing optional items is
+		# ''.
+    my $NSU = 4;			# Number of list items per field
+    my @units = split(/((?:\(\w*\))?)((?:=[-\w]*)?)([^\w|-]+)/, $fmt);
+		# Can't handle a separator at the start of the format.  Also 
+		# fails if the format is "".
+    barf(3, "Flatformat->new(%s): separator not allowed to start the format.\n%s\n", 
+	$this->{fclass}, $this->{format}) unless $units[0];
+    my $rpsep = my $psep = '';		# Separator from the preceeding field
+    my $regexp = "^";			# Must match at start of line
+    for(my $i = 0; $i < @units ; $i += $NSU) {
+	my ($name, $flags, $dflt, $sep) = @units[$i .. $i+$NSU-1];
+		# $name is a slash separated list of attribute names.  Use the
+		# first of these as the official field name.
+	my $names = [ split(/\|/, $name) ];
+	my $k;
+	foreach $k (@$names) {		# Make a list of all attrs in entry
+	    $attrs{$k}++;
+	}
+	push(@$names, 'no-name') unless @$names;	# Should never happen
+	$name = $names->[0];
+	$flags =~ /\(?([[:alpha:]]*)([\d]*)\)?/;
+	my $wid = $2 || 0;
+	$flags = $1;
+	$dflt =~ s/^=//;
+	my $rsep = $sep;	# $rsep is a regexp recognizing the separator
+	$rsep =~ s/^\s+/\\s+/g;		# Leading whitespace is required
+	$rsep =~ s/\s+/\\s*/g;		# Other whitespace is optional
+		# %pf becomes the per-field hash with flags and info about
+		# that field.
+	my %pf = (sep => $sep, rsep => $rsep, psep => $psep, rpsep => $rpsep, 
+	    wid => $wid, attrs => $names, dflt => $dflt, index => int($i/$NSU));
+	$flags =~ s/\d//g;		# Remove the field width from the flags
+	foreach $k (split(//, $flags)) {	# Turn on flag letters
+	    $pf{$k}++;
+	}
+	foreach $k (@$names) {		# Create a unit for each field name
+	    if (exists($PF->{$k})) {
+		$PF->{$k}{split} = \%pf;
+	    } else {
+		$PF->{$k} = \%pf;
+	    }
+	}
+	if ($pf{k}) {			# Capture the name of the primary key
+	    $pf{N}++;			# Primary key may not be null.
+	    $this->{prikey} = $name;
+	}
+		# This is the fragment of the regular expression that captures
+		# the field content.  
+	(my $notrsep = $sep) =~ s/\s+/\\s/g;	# Character class of separator
+		# Regexp explanation:  the whole regexp's output is captured.
+		# 1st alternative: a literal quote followed by 
+		#    either non-quote or backslash (don't backtrack) or 
+		#    backslash and 1 char, the pair repeated * times (don't
+		#    backtrack), up to an ending literal quote.
+                # 2nd alternative: Complement of the following separator *
+		#    times.
+		# It's legal for the payload to have 0 characters; null fields
+		# are checked for after being split up.
+	my $re = $pf{q} ? "(\"(?:[^\\\"]++|\\\\.)*+\"|[^$notrsep]*)" : 
+			"([^$notrsep]*)";
+	if ($pf{r}) {
+		# Flag (r) means the field is repeated.  A separate regexp
+		# is used to split it.
+	   $this->{splitre} = $rsep;
+		# Change to a regexp which captures the entire trailing 
+		# portion, which will be split by {splitre}.
+	   $re = "(.*)";
+	}
+		# If the field is missing, the preceeding separator may or
+		# may not appear.  Only the last field can be optional.  
+	if ($pf{o}) {
+	    $re = "(?:$rpsep(?:$re)?|(?:$rpsep)?)";
+	} else {
+		# Non-optional field, prepend the previous separator
+	    $re = "$rpsep$re";
+	}
+	$regexp .= $re;			# Build up the regexp for the whole line
+	push(@$fields, $name);		# Save the field name.  
+	$psep = $sep;			# Propagate the previous separator
+	$rpsep = $rsep;			# Propagate the previous separator
+    }
+    $regexp .= '$';			# Regexp must match to the end of line
+    $this->{regexp} = qr{$regexp};
+    barf(010, sub {"FlatFormat->new(%s) regexp = '%s' = '%s'\n", $this->{fclass}, $regexp, $this->{regexp} });
+    $this->{attrs} = [ keys %attrs ];
+    barf(3, "FlatFormat->new(%s): no primary key field (flagged with (k)).  Format:\n    %s\n", $this->{fclass}, $this->{format})
+	unless $this->{prikey};
+    $this;
+}
+
+# Clones the preset format info for this file/object type.
+# Override presets with explicitly specified options.
+# Make sure required options are known (for nonstandard format).
+# Arg (ordinary subroutine): 
+#   $fclass	Format class (key in %preset).  Can handle a nonstandard format.
+#   $onerror	Argument to barf (0, 2, 3) for the error message if required
+#		members were not specified.
+#   Returns	Preset hash.  It will have a member "BAD" whose value is the
+#		error message if the result is incomplete.
+sub pclone {	#FlatFormat
+    my($fclass, $onerror) = @_;
+    my $ps = $preset{$fclass} ? { %{$preset{$fclass}} } : { };	#Return value
+		# Override preset values with command line arguments, for these
+		# members.
+    foreach my $k (qw(F t O)) {
+	$ps->{$k} = $opt->{$k} if $opt->{$k}
+    }
+    $ps->{f} ||= $fclass;	# Provide class, only for nonstandard format
+    my @missing = grep {!exists($ps->{$_})} qw(F t O f);
+    if (@missing) {
+	my $ermsg = $ps->{BAD} = 
+	    "FlatFormat->pclone(%s): incomplete format, you must specify -"
+	    . join(', -', @missing);
+	barf($onerror, "FlatFormat->pclone(%s): %s\n", $fclass, $ermsg);
+    }
+    $ps;
+}
+
+# Retrieve the correct FlatFormat.  The format class is inferred from the
+# Distinguished Name, and there is a cache for the preset formats since
+# the {base} member is altered.  Args:
+#   $class	Name of class.  (Static member function.)
+#   $subrt	Subroutine to be called: $format->{$subrt}($entry)
+#   $entry	Argument for $subrt, must be an Entry ref. (actually, anything
+#		with a $entry->dn() method) or a Distinguished Name string.
+#   Returns	What $subrt returns.
+sub auto {	#FlatFormat
+    my($class, $subrt, $entry) = @_;
+    my $dn = ref($entry) ? $entry->dn() : $entry;	# Extract Dist. Name
+    my $fullen = length($dn || '') > length($opt->{b});	# False for containers
+    if (!$dn) {
+	$dn = 'dc=nonexistent';
+	barf(2, "FlatFormat->auto(%s, undef), using %s as the DN\n", 
+	    $subrt, $dn);
+    }
+    my ($fclass, $attr);		# File type, key in %preset
+    if ($fullen) {
+	$fclass = $opt->{f};
+    } else {
+		# Get the attribute name that begins the DN and convert.
+	my $i = index($dn, '=');
+	$fclass = $attr2obj{substr($dn, 0, $i)} || 'unknown';
+    }
+		# If the format is not cached, do that now.
+    if (!$cache{$fclass}) {
+	my $ps = &pclone($fclass, 3);	# Clone the preset format hash
+	my ($leaf, $stem) = split(/,/, $dn, 2);
+	$cache{$fclass} = $class->new($ps, ($stem || ''));
+    }
+    my $fmt = $cache{$fclass};
+    {
+	no strict;			# Allow symbolic reference to subrt
+	$fmt->$subrt($entry);		# Will return what $subrt returns
+    }
+}
+
+# Returns the relevant FlatFormat object ref for a Distinguished Name or an 
+# Entry ref.  Call as FlatFormat->auto('getfmt', $entry) (or $dn as string).
+sub getfmt {	#FlatFormat
+    $_[0];				# All he wants is the FlatFormat object
+}
+
+# Returns a list of attributes relevant to this format.  'objectClass' is
+# prepended implicitly.  
+sub attrs {	#FlatFormat
+    @{$_[0]->{attrs}};
+}
+
+
+# Splits a line to become an Entry.  Args:
+#   $this	FlatFormat object ref.
+#   $line       A record from the flat file, as a string possibly with an
+#               ending newline.  Has to be the right format, realm containers
+#               not allowed.
+#   $lineno	Line number where this entry was found.  
+#   Returns     Either a Net::LDAP::Entry ref. or a scalar error message, which
+#		could be '' if the line is neither content nor an error, e.g.
+#		a comment or empty line.  Modification type is 'add'.
+# Rules for rejecting lines: blank lines and comments (starting with #) are
+# rejected with a message of "".  On other lines that do not match the format,
+# the message has a description.
+# (Debug this carefully for /etc/hosts: RDN is the FQDN, multiple cn's are
+# the hostnames and include the FQDN.  Yes, comes out right.) #DEBUG
+sub split {	#FlatFormat
+    my($this, $line, $lineno) = @_;
+    chomp $line;
+		# If the cleanup routine returns false (undef), the input line
+		# is supposed to be tossed silently.  
+    &{$this->{cleanup}}($line) or return '';
+		# Reject a comment or blank line.
+    return '' if $line =~ /^\s*(?:#|$)/;
+		# Split the line according to its format.  If capturing parens
+		# don't capture anything (e.g. an optional field) then their
+		# value is undef, not a zero-length list, so toss the undefs.
+    my @line = grep {defined($_)} reverse ($line  =~ $this->{regexp});
+    my $nin = scalar(@line);
+    if ($nin <= 0) {
+	$opt->{errcode} |= 4;
+	return "Line does not match the expected format";
+    }
+		# Capture a trailing repeated field.  The entire repetition
+		# is in $line[0].  
+    if (exists($this->{splitre})) {
+	my @extra = split($this->{splitre}, $line[0]);
+	splice(@line, 0, 1, reverse @extra);
+    }
+    my $ermsg = '';			# Return value in case of error
+    my $entry = Net::LDAP::Entry->new(); # Return value if there's no error
+					# Changetype is 'add' by default.
+    $entry->{util_lineno} = $lineno;	# Cowboy programming, save line number
+		# Stuff the line's fields into the new Entry.
+    my $i = 0;				# Subscript in @fields
+    my $j = 1;				# Actual field number, 1 origin, for msg
+    my $ixsub = $this->{ixsub};		# Subrt. to translate $i to field index.
+    my $nflds = @{$this->{fields}};	# Only the last field can be repeated
+    my %split;				# Recognize if a field is split
+    my $repeat;				# True if the last field is repeated
+    my $rdn;				# First instance of primary key
+    my $prikey = $this->{prikey};
+    my($f, $PF, $v, $ix, $sub, $ac);
+    STUFF: {
+	$v = pop @line;			# The value of this field
+	$ix = &{$ixsub}($this, $v, $i);	# What kind of field it is (array index)
+	$f = $this->{fields}[$ix];	# Name of field
+	$PF = $this->{PF}{$f};		# Per field data and flags
+		# Recognize the second part of a split field.
+	$PF = $PF->{split} if exists($PF->{split}) && $split{$f}++;
+		# Convert from flat to LDAP format (if needed).
+	$v = $conv->conv($f, 'ldap', $v);
+		# Is this field allowed to be repeated?  
+	$repeat++ if $PF->{r};
+	if ($i > $PF->{index} && !$PF->{r} && $nin > $nflds) {
+	    $ermsg .= sprintf("; too many fields (has %d, max %d)", 
+		$nin, $nflds);
+	    last;
+	}
+		# Certain fields in the flat file do not get into LDAP table.
+	next if $PF->{x};
+		# Is the field illegally null?
+	if ($PF->{N} && $v eq '') {
+	    $ermsg .= sprintf("; field %d (%s) must not be null", $j, $f);
+	    $v = "_NULL_";
+	}
+		# Fill in the default value for a null field, usually ''.
+	$v = $PF->{dflt} if $v eq '';
+		# Add the value to the new Entry.
+	foreach my $a (@{$PF->{attrs}}) {
+	    $entry->add($a, $v);
+	}
+		# Capture the primary key, only the first value counts.
+	$rdn = $v if $f eq $prikey && !defined($rdn);
+    } continue {
+	$i++ unless $repeat;
+	$j++;
+	redo STUFF if @line;
+    }
+		# Check that we got all required fields.
+    while (($f, $PF) = each %{$this->{PF}}) {
+	if ($PF->{N} && !$entry->exists($f)) {
+	    $ermsg .= sprintf("; field %d (%s) must not be omitted", 
+		$PF->{index}+1, $f);
+	    $entry->add($f, '_MISSING_');
+	}
+    }
+		# Stuff the objectClass attributes.
+    $entry->add(objectClass => $this->{oclass});
+		# Set up the Entry's Distinguished Name.  In case of multiple
+		# values of the primary key, the first one is used.
+    if (defined($rdn)) {
+	$entry->dn($prikey . '=' . $rdn . ',' . $this->{base});
+    } else {
+	$ermsg .= sprintf("; missing primary key (%s)", $prikey);
+    }
+    substr($ermsg, 0, 2) = '' if $ermsg;	# Remove unused leading '; '
+    $ermsg ? $ermsg : $entry;
+}
+
+# Joins an entry, giving a flat string to be written in the UNIX directory 
+# file.  This is the inverse of sub split().
+#   $this	Class object ref. (FlatFormat).
+#   $entry	The Net::LDAP::Entry object to be emitted.  If its objectClass
+#		differs from what $this has the format for, this subroutine 
+#		will find and use the correct format (for realm containers). 
+#		Non-Entries (typically undef) are handled neatly.
+#   Returns     A list, usually just one member, each element of which is a
+#		string representation of the Entry, with an ending newline.
+#		/etc/hosts needs a separate line for each IP address,
+#		duplicating the hostnames.
+sub join {	#FlatFormat
+    my($this, $entry) = @_;
+    unless (eval { $entry->isa('Net::LDAP::Entry') } ) {
+	return !defined($entry) ? "undefined entry\n" :
+	    !ref($entry) ? "entry is scalar: $entry\n" :
+	    sprintf("non-entry, type %s\n", ref($entry));
+    }
+    my $dn = $entry->dn();
+		# Auto-switch formats for realm containers.
+    $this = FlatFormat->auto('getfmt', $dn) if length($dn) <= length($opt->{b});
+    my @lines;				# The eventual return value
+    my $L;				# Subscript in per-line arrays
+    my $sub;				# Attribute conversion subroutine
+    NLINES: {
+	my $line = '';			# The line that's being put out
+	my $nlines = 0;			# True if additional lines must come out
+	$L = scalar(@lines);		# Subscript corresponding to output line
+	my %split;			# To recognize a split field
+	my($f, $PF, $v, $j);
+	foreach $f (@{$this->{fields}}) {
+	    $PF = $this->{PF}{$f};	# Per field data and flags
+	    $PF = $PF->{split} if $split{$f}++;
+			# In the case of multiple values, if the field has the
+			# 'r' flag they are joined; otherwise one line is
+			# put out for each, and for those fields with only one
+			# value (or fewer than the maximum), that value is
+			# repeated in each line.  (This is for /etc/hosts,
+			# a separate line for each IP address.)  Fields that
+			# were omitted from the Entry are put out as ''.
+	    my $vals = $entry->get_value($f, asref => 1) || 
+		($PF->{N} ? ['(missing)'] : ['']);
+	    last if $vals->[0] eq '' && $PF->{o}; # Missing trailing fields
+			# Convert the value from LDAP to flat format, if needed.
+			# This also makes a local copy so we aren't modifying
+			# the array in the Entry.  Also sort to canonical order.
+	    $vals = [ sort $conv->convlist($f, 'flat', $vals) ];
+			# On the primary key, the instance which goes into the
+			# Distinguished Name has to come first.
+	    DNFR: {
+		last DNFR unless $PF->{k} && @$vals > 1 && $dn =~ /=([^,]+)/;
+			# $1 is the primary key in the DN.  $j = its subscript
+			# in @$vals.  
+		($j) = grep { $vals->[$_] eq $1 } 0..$#{$vals};
+		last DNFR if !defined($j) || $j == 0;	# DN key already first
+		$v = splice(@$vals, $j, 1);
+		unshift(@$vals, $v);
+	    }
+			# If a width was specified, pad the value(s) with
+			# blanks or tabs -- tabs if the following separator
+			# is a tab and the width is a multiple of 8.
+	    my $w = $PF->{wid};
+	    if ($w) {
+		foreach $v (@$vals) {
+		    if (substr($PF->{sep},0,1) eq "\t") {
+			if (length($v) < $w-8 && $w >= 8 && $w % 8 == 0) {
+					# Pad with tabs, counting separator tab
+			    $v .= "\t" x (int(($w - length($v))/8));
+			}
+		    } elsif (length($v) < $w) {
+			$v .= ' ' x ($w - length($v));	# Pad with blanks
+		    }
+		}
+	    }
+	    if ($PF->{r}) {
+			# Bizarre kludge in /etc/rpc: field 1 is called "cn"
+			# and is the primary key; field 3 is also called "cn"
+			# and is multi-repeated.  On output the first value 
+			# goes in field 1 and the rest in 3.  
+		if (!$PF->{s}) {
+		    $v = join($PF->{sep}, @$vals);
+		} elsif ($split{$f} <= 1) {
+		    $v = $vals->[0];
+		} else {
+		    $v = join($PF->{sep}, @{$vals}[1..$#$vals]);
+		}
+	    } else {
+		my $k = $#{$vals};		# If 1 value, use in each line
+		if ($PF->{s}) {
+		    $k = 0;			# Split field, first value here
+		} elsif ($k > $L) {		# Repeated, one in each line
+		    $k = $L;
+		    $nlines++;			# More values -> need more lines
+		}
+		$v = $vals->[$k];		# This value will be used.
+	    }
+			# Add the field preceeded by the separator of the
+			# previous field.
+	    $line .= $PF->{psep} . $v;
+	}
+	$line .= "\n";
+	push(@lines, $line);
+	redo NLINES if $nlines;
+    }
+    @lines;
+}
+
+# Joins an entry into a canonical form, suitable for checking if Entries are
+# equal.  
+#   $class	Name of class (static member function).
+#   $entry	The Net::LDAP::Entry object to be mashed, could be undef.
+#   Returns	A string of alternating attribute names and value lists.
+#		No ending newline.
+sub mash {	#FlatFormat
+    my($class, $e) = @_;
+    return '(undef)' unless defined($e);
+    my $res = "DN " . $e->dn();		# The return value
+    foreach my $attr ($e->attributes(nooptions => 1)) {
+	$res .= ' ' . $attr;
+	my $val = $e->get_value($attr, asref => 1);
+	$res .= ' [' . CORE::join(' ', @$val) . ']';
+    }
+    $res;
+}
+
+# Merges one Entry into another.  Args:
+#   $class	Name of class or ref. to class object (static member function)
+#   $eexist	The "more equal" entry; in theory merging is commutative, but
+#		this entry is the one that existed before, and that will remain
+#		afterward.
+#   $entry	Attributes from here are merged into $eexist.  Their DN's
+#		should be the same.
+#   Returns	Nothing.
+sub merge {	#FlatFormat
+    my($class, $eexist, $entry) = @_;
+    foreach my $f ($entry->attributes(nooptions => 1)) {
+	$eexist->add($f => $entry->get_value($f, asref => 1));
+    }
+}
+
+# Removes extraneous attributes from an Entry, i.e. attributes which are not
+# expected for this format.  The People table gets content from both 
+# /etc/passwd and /etc/shadow, and we need to not delete one's attributes
+# when updating the other.  Also, attributes whose value is '' are removed,
+# since this syntax is rejected by the server.  Args:
+#   $this	Class object reference
+#   $e		Entry to be purged, could be undef.
+#   Returns	Entry with only format-relevant attributes.  In most cases 
+#		there is no change, and $e is returned, but if any attributes
+#		are actually purged then $e is cloned and the clone is 
+#		returned.  If $e is undef, then undef is returned.
+# WARNING: this subroutine does not actually remove the attributes, it 
+# configures the Entry so if Entry->update is called, the server's version will
+# lose those attributes.  
+sub purge {	#FlatFormat
+    my($this, $e) = @_;
+    my $cloned;				# True if $e has been cloned.
+    return $e unless $e;
+    foreach my $f ($e->attributes(nooptions => 1)) {
+		# Remove values of ''
+	my @toss = grep { $_ eq '' } @{$e->get_value($f, asref => 1)};
+	if (@toss) {
+	    $e = $e->clone() unless ($cloned++);
+	    $e->delete($f, \@toss);
+	}
+		# Remove the entire attribute if it is irrelevant.
+	next if $this->{PF}{$f};	# This attribute goes with this format
+	next if $f eq "objectClass";	# objectClass is always required.
+	$e = $e->clone() unless ($cloned++);
+	$e->delete($f);			# Toss irrelevant attribute
+    }
+    $e->changetype('modify') if $cloned;
+    $e;
+}
+
+# Call this static member function to infer the filetype from flat filenames
+# and set up the corresponding defaults.
+sub default {	#FlatFormat
+    my($class) = @_;
+    my $rc = 1;			# Eventual return value
+	    # If -b was provided, extract the OU.
+    if (!$opt->{O} && $opt->{b} && $opt->{b} =~ /ou=(\w+)/i) {
+	$opt->{O} = $1;
+    }
+	    # Infers the filetype from the -c, -i or -o values.  
+    my($k, $v);
+    $opt->{f} ||= '';			# Avoid errors in error printouts.
+    foreach $k (qw(c i o)) {
+	last if $opt->{f};		# Exit if we already know the filetype
+	my $fname = $opt->{$k} or next;
+	$fname =~ s/\.[.\w]*$//;	# Chop off extension(s) and directories
+	$fname =~ s/.*\///;
+	next unless $preset{$fname};	# Bypass if useless for picking a format
+	$opt->{f} = $fname;
+    }
+    my $ps = $opt->{f} ? &pclone($opt->{f}, 0) : 
+	{ BAD => "Can't determine -f (table format)" };
+	    # Set -O from the preset, if not already known.
+    $opt->{O} ||= $ps->{O};
+    if ($ps->{BAD}) {
+	$rc = 0;
+	barf(2, "FlatFormat->default: %s, using -f '%s'\nStandard -f values: %s\n",
+	    $ps->{BAD}, ($opt->{f} || '(unknown)'),
+	    CORE::join(' ', sort keys %preset) );
+    }
+	    # Lacking -b, create it from the OU and BASE from ldap.conf
+	    # "eval" because if -f is wrong then -O isn't set giving an 
+	    # annoying error message.  
+    eval {$opt->{b} = 'ou=' . $opt->{O} . ',' . $opt->{base} } if (!$opt->{b});
+    $rc;
+}
+BEGIN { push(@Opt::defaults, 'FlatFormat', \&default); }
+
+# ======
+package CiEntry;
+# A table of the values of one attribute of an Entry, indexed for use in
+# CommonFile::diffentry().  The main issue here is that matches are case
+# insensitive, and we need to detect and work around case conflicts, e.g.
+# an attribute has the value 'deKuyper' and also 'Dekuyper'.  According to
+# LDAP these are equal and it's an error to try to put both on the value
+# list.  Also a value of '' is poisonous.  
+
+BEGIN { *barf = \&Barf::barf; }
+
+use Net::LDAP::Entry;
+
+# Creates a new CiEntry object.  Args:
+#   $class	Name of class (CiEntry)
+#   $ent	Entry whose attribute is to be indexed.
+#   $attr	Name of attribute to be indexed.  If $ent does not have this
+#		attribute, zero values will be in the index. 
+#   Returns	New object with indices of the attribute's values.
+sub new {	#CiEntry
+    my($class, $ent, $attr) = @_;
+    my $this = bless( {
+		attr	=> $attr,	# For debug messages
+		vals	=> { },		# Keys are values, case sensitive
+		vci	=> { },		# Keys are lower case values, values 
+					# are nbr of vals with this lower case
+		nci	=> 0,		# Number of case conflicts found
+		ndup	=> 0,		# Number of duplicate values found
+		nval	=> 0,		# Number of values (incl. duplicates)
+	}, $class);
+    my $vs = $ent->get_value($attr, asref => 1) || [];
+    $this->{nval} = @$vs;
+    foreach my $v (@$vs) {
+		# Make an index of the values.  
+		# Recognize a duplicate value, and bypass case insensitive
+		# test which would wrongly trigger on every duplicate.  
+	$this->{ndup}++, next if $this->{vals}{$v}++;
+		# If 2 values have the same lower case, that's a case conflict.
+	$this->{nci}++ if $this->{vci}{lc($v)}++;
+    }
+    $this;
+}
+
+# Extracts the values, working around case conflicts.  Args:
+#   $this	Class object ref.
+#   \@prev	Ref. to another list of values as returned by vals().  If this
+#		is not undef, the union (case insensitive) of it and the values
+#		from $this is taken.  
+#   Returns	Ref. to list of values.
+sub vals {	#CiEntry
+    my($this, $prev) = @_;
+    my %vci;
+    my %add;
+    if ($prev) {
+	foreach my $v (@$prev) {
+	    my $L = lc($v);
+	    $add{ $this->{vci}{$L} ? $L : $v }++;
+	}
+    }
+    foreach my $v (keys(%{$this->{vals}})) {
+	my $L = lc($v);
+	$add{ ($this->{vci}{$L} > 1) ? $L : $v }++ unless $add{$L};
+    }
+		# At one point a value of '' was showing up, probably due to
+		# a bug.  It's an error to create this; cryptic error message
+		# is "no values for attribute type".  Toss.  
+    delete $add{''};
+    [ keys %add ];
+}
+
+# Produces differences between two CiEntry objects.  Args:
+#   $this	Class object ref. for the "master" entry.
+#   $othr	Class object ref. for the "output" entry.
+#   $union	If this is true, the objective is to produce the union of the
+#		two sets of values; if false, we're trying to change $othr
+#		to be equal to $this in its set of values.
+#   Returns	A hash ref. with these members:
+#		strategy	1 = add individual values 
+#				2 = toss individual values
+#				4 = total replacement is required. (*)
+#				010 = $othr doesn't have attribute so add it.(*)
+#				020 = $this lacks attribute so toss it in $othr.
+#				040 = neither has the attribute, skip it.
+#		add		Hash whose keys are values to be added, or in
+#				a total replacement, all the new values.  
+#				(indicated by * on the strategy bits).
+#		toss		Hash whose keys are values to be removed 
+our @diffstr; BEGIN { @diffstr = (040, 010, 020, 0); }
+sub diff {	#CiEntry
+    my($this, $othr, $union) = @_;
+    my %res = ( add => { }, toss => { }, );	# Result
+    my ($v, $L, %vci);
+		# First handle the cases of adding or tossing everything.
+    my $strategy = 
+	$diffstr[($this->{nval} ? 1 : 0) + ($othr->{nval} ? 2 : 0)];
+		# Total replacement needed if either entry has a case conflict
+		# or if the destination has duplicate values.  
+		# A duplicate in $this does not prevent differential strategy.
+		# Presence of '' as a value in $this prevents differential. 
+		# If either entry lacks the attribute ($strategy != 0), bypass 
+		# setting up the differential values.
+    my $nci = $this->{nci} + $othr->{nci} + $othr->{ndup} + 
+	(exists($res{add}{''}) || 0) + $strategy;
+		# Assuming a differential strategy will work, identify the
+		# values that need to be added or removed.  
+    my($e1, $e2) = @_;
+    my $list = 'add';
+    my $istr = 1;			# Strategy: incremental add or toss
+    LISTS: while (!$nci) {
+	foreach $v (keys %{$e1->{vals}}) {
+	    next if exists($e2->{vals}{$v});	# $e2 already has, don't add it
+	    $res{$list}{$v}++;			# Need to add/toss this value.
+	    $strategy |= $istr;
+			# Bypass if no case conflict in the destination.
+			# If we're here, $v isn't in $e2, but if lc($v) is
+			# in {vci} then some other case combination is in $e2,
+			# which is a case conflict.  
+	    next unless exists($e2->{vci}{lc($v)});
+	    $nci++;				# Oops, need total replacement.
+	    $strategy &= ~3;
+	    $strategy |= 4;
+	    last LISTS;
+	}
+	last LISTS if $list ne 'add' || $union;
+	$v = $e1; $e1 = $e2; $e2 = $v;		# Exchange $e1 and $e2
+	$list = 'toss';
+	$istr++;
+    }
+		# If a total replacement is needed, fill in {add}.  Keep case,
+		# except if $this has a case conflict, fold to lower case. 
+    if ($strategy & 014) {
+	$v = $this->vals();
+	$v = $othr->vals($v) if $union;
+	if (@$v) {
+	    $res{add} = { map {$_, 1} @$v };
+	} else {
+                # If '' is the only value (as when fields are omitted, which is
+		# common), we end up with no values.  Toss the attribute if
+		# $othr has it, or skip if it doesn't.
+	    $strategy = ($strategy & 4) ? 020 : 0;
+	    $res{add} = { };
+	}
+    }
+    $res{strategy} = $strategy;
+    \%res;
+}
+
+# Turns a CiEntry into a multi-line string with ending newline(s).
+# For debugging.
+sub as_string {	#CiEntry
+    my($this) = @_;
+    my $res = sprintf(
+	"%s: %d values, %d duplicates, %d case conflicts, values:\n    ", 
+	@{$this}{qw(attr nval ndup nci)});
+    $res .= join(' ', map {$_, $this->{vci}{lc($_)}} sort keys %{$this->{vals}});
+    $res .= "\n";
+    $res;
+}
+
+# Convers a diff output to a string (static member fcn) (for debugging).
+sub printdiff {	#CiEntry
+    my($class, $diff) = @_;
+    sprintf("str=0%o ADD %s  TOSS %s", $diff->{strategy}, 
+	join(' ', keys %{$diff->{add}}), join(' ', keys %{$diff->{toss}}));
+}
+
+# ======
+package CommonFile;
+# Common data members and member functions shared by the I/O channel classes
+# The CommonFile object is a hash with these members:
+#   type    Textual file type: 'flat', 'ldif', 'ldap'.  
+#   fname   Name of the file as given in the -i -c or -o option, or "LDAP table
+#	    whatever" for LdapIO.
+#   mode    PERL mode string used to open the file: 'r' = read, 'w' = write.
+#   FH	    FileHandle reference of the file.  Absent in LdapIO.  
+#   eof	    True when all data has been read.
+#   stuff   Which parts were already prestuffed: 1 = realm containers, 
+#	    2 = content.
+#   lineno  Line number in the file which produced the most recent Entry.
+#	    1 origin, i.e. the first line is designated "1".
+#   fmt	    Ref. to FlatFormat object describing the file format.
+#   uniq    True if the primary key is supposed to be unique (as it almost
+#	    always is).
+#   E       A hash ref, keys are Distinguished Names in the various Entries.
+#	    Values are Entry objects, either prestuffed or written out.
+#   keys    Ref. to array of DN's in {E}.  It gets added to or cleared.  The
+#	    outermost (biggest) container comes last, and leaf objects are
+#	    in reverse lexical order, so you can pop the array.
+
+BEGIN { *opt = \$Opt::opt; *barf = \&Barf::barf; }
+
+use Net::LDAP::Entry;
+use FileHandle;
+
+# Constructor.  Args:
+#   $class	Name of class (CommonFile)
+#   $fmt	Ref. to FlatFormat object giving the format of the file.
+#   $mode	Mode string to open the file, 'r' or 'w'.
+#   $fname	Filename to be opened.  Undef to not open (for LdapIO), in 
+#		which case the caller will set $this->{fname} later.
+#   Returns	New class object
+sub new {	#CommonFile
+    my($class, $fmt, $mode, $fname) = @_;
+    barf(020, sub { "CommonFile->new (for %s) opening %s (%s)\n", $class, ($fname || '(none)'), $mode });
+    my $this = bless({
+		fname	=> $fname,
+		mode	=> $mode,
+		fmt	=> $fmt,
+		E	=> { },
+		keys	=> [ ],
+		FH	=> myopen($mode, $fname),
+		lineno	=> 0,
+		eof	=> 0,
+		stuff	=> 0,
+		uniq	=> $fmt->{PF}{$fmt->{prikey}}{U} ? 0 : 1,
+	}, $class);
+    $this;
+}
+
+use IO::Handle;
+use IO::File;
+
+# Open a file, with some special contingencies.  (Ordinary subroutine.)  Args:
+#   $mode	'r' or 'w' for the direction of I/O.
+#   $fname	Name of file to open, with these special cases:
+#		'-' replicates (fdopen) STDOUT or STDIN.
+#		undef causes nothing to be opened, silently.
+#   Returns	IO::Handle open on the file, or undef if $fname is undef.
+#		If there was an error opening, this subroutine barfs fatally. 
+sub myopen {	#CommonFile
+    my($mode, $fname) = @_;
+    my $FH;
+    if (!defined($fname)) {
+	# Not opening any file, return undef
+    } elsif ($fname ne '-') {
+	$FH = IO::File->new($fname, $mode);
+    } elsif ($mode eq 'w') {
+	$FH = IO::Handle->new();
+	$FH->fdopen(\*STDOUT, 'w');
+    } else { # $mode eq 'r'
+	$FH = IO::Handle->new();
+	$FH->fdopen(\*STDIN, 'r');
+    } 
+    barf(3, "Failed to open(%s) %s: %s\n", $mode, $fname, $!)
+	if $fname && !$FH;
+    $FH;
+}
+
+# Each derived class has its own methods for read(), write(), wdiff().
+
+# Takes the union of two entries.  Args:
+#   $this	Class object ref.
+#   $e1		This Net::LDAP::Entry object is merged into $e2
+#   $e2		This one becomes the union, or is modified to become a copy
+#		of $e1.
+#   $union	If true, $e2 becomes the union of both entries.  If false,
+#		it becomes a copy of $e1.  This happens using attribute-setting
+#		methods so when $e2->update() is called, only altered 
+#		attribute values will be sent to the server, not replacing the
+#		whole entry.  
+#   Returns	Nonzero if any values were changed, otherwise 0.
+sub union {	#CommonFile
+    my($this, $e1, $e2, $union) = @_;
+    my $rc = 0;				# Return value, count of changes
+    my $PF = $this->{fmt}{PF};
+    my @attrs = FlatFormat->auto('attrs', $e1);
+                # Compare each attribute of $e1 with $e2.  Only attributes
+		# relevant to the current format (plus objectClass).  OK to
+		# retrieve an attribute that the Entry doesn't have.
+    foreach my $attr (@attrs) {
+		# Compare the values of this attribute.
+	my $cie1 = CiEntry->new($e1, $attr);
+	my $cie2 = CiEntry->new($e2, $attr);
+	my $cdiff = $cie1->diff($cie2, $union && $PF->{$attr}{u});
+	my $s = $cdiff->{strategy};
+		# Execute the strategy.
+		# If neither entry has the attr, skip it.  If their values are
+		# identical, skip it.
+	next if $s == 0 || $s & 040;
+	$rc++;					# Yes a difference was found.
+	    # $e1 lacks it, toss on $e2
+	$e2->delete($attr), next if ($s & 020);
+	    # Total replacement required
+	$e2->replace($attr, [ sort keys %{$cdiff->{add}} ]), next if ($s & 4);
+	    # Remove unwanted values differentially.
+	$e2->delete($attr, [ sort keys %{$cdiff->{toss}} ]) if ($s & 2);
+	    # $e2 lacks $attr, add all values.  Or, differential addition.
+	$e2->add($attr, [ sort keys %{$cdiff->{add}} ]), next if ($s & 011);
+    }
+    $rc;
+}
+
+# Produces a list of names of the realm containers (from $opt->{b}).
+# Bugfix: you need the realm container corresponding to $opt->{b}, and the OU,
+# but not more general containers, because there is no database that could
+# contain
+# them.
+#   $class	Class name or object ref (static member function)
+#   Returns	Ref. to a list of Distinguished Names, outermost (most 
+#		general) first.
+sub containerdn {	#CommonFile
+    my($class) = @_;
+    my @dns;				# The return value(s)
+		# First get the realm containers including the OU.
+    my $dn = '';
+    my @dn = reverse split(/,/, $opt->{b});
+    foreach my $key (@dn) {
+	$key .= ',' if $dn;
+	substr($dn, 0, 0) = $key;
+	push(@dns, $dn);
+    }
+    splice(@dns, 0, scalar(($dns[-1] =~ /ou=/) ? @dns - 2 : @dns - 1));
+    \@dns;
+}
+
+# Produces a list of synthetic Entries for realm containers (from $opt->{b}).
+#   $class	Class name or object ref (static member function)
+#   Returns	Ref. to a list of Entries, outermost (most general) first.
+sub containerent {	#CommonFile
+    my($class) = @_;
+    my @entries;			# Return value
+    my $lineno = -1;
+    my $dns = $class->containerdn();
+    foreach my $dn (@$dns) {
+	my($attr, $val) = split('[=,]', $dn, 3);
+	my $oclass = $FlatFormat::attr2obj{$attr};
+	my $classes = [ split(' ', $preset{$oclass}{t}) ];
+	my $e = Net::LDAP::Entry->new($dn, 
+	    $attr => $val, objectClass => $classes);
+	$e->{util_lineno} = $lineno--;	# Cowboy programming, save line number
+	push(@entries, $e);
+    }
+    \@entries;
+}
+
+# Common code for pre-stuffing entries.  Args:
+#   $this	Class object ref.
+#   $replace	0 = a duplicate entry is an error and is skipped.
+#		1 = take union if U flag is present, error and skip if not.  
+#		2 = take union if U flag, otherwise new entry replaces old one.
+#		3 = new entry replaces old, whether or not U flag is there.
+#   \@entries	Each of these in order is filed in the {E} member and its
+#		Distinguished Name is prepended to {keys}.  It's more efficient
+#		to do a lot of Entries at once.
+#   Returns	1 if everything worked, 0 if error (duplicate entries without
+#		U flag on primary key field in the format).
+sub stuffcom {	#CommonFile
+    my($this, $replace, $ents) = @_;
+    my $rc = 1;				# Eventual return code
+    my $E = $this->{E};
+    my $PF = $this->{fmt}{PF}{$this->{fmt}{prikey}};	# Primary key info
+    my $eflg = $PF->{E};				# Extract E and U flags
+    my $uflg = (qw(0 1 1 0))[$replace] && !$this->{uniq}; # From $PF->{U};
+    my @keys;
+    foreach my $entry (@$ents) {
+	my $dn = $entry->dn();
+	my $ex = $E->{$dn};		# If an entry already exists
+	if (!defined($ex)) {
+	    $E->{$dn} = $entry;		# First time we've seen this entry
+	    push(@keys, $dn);
+	} elsif ($uflg) {
+	    $this->union($entry, $ex, 1); # Take union with existing entry
+	} elsif ($replace >= 2) {
+	    $E->{$dn} = $entry;		# Incoming entry replaces existing one
+	    # and don't add it a 2nd time to the key list.
+	} else {
+	    $rc = 0;
+	    $opt->{errcode} |= 4;
+	    barf(2, "Duplicate DN %s (skipped) at line %d, keeping line %d\n", 
+		$dn, ($entry->{util_lineno} || -1), ($ex->{util_lineno} || -1));
+	    LdifFile->print(\*STDERR, $entry, "Failing entry:\n");
+	}
+    }
+    unshift(@{$this->{keys}}, reverse @keys) if @keys;
+    $rc;
+}
+
+# Reads the entire table and saves Entries in the {E} member.  This version
+# is shared between FlatFile and LdifFile; LdapIO has its own.  Args:
+#   $this	Class object ref.
+#   $which	Sum of bits: 1 = include realm containers, 2 = read the
+#		content (leaf nodes).  If read from a file, the containers
+#		are always synthetic.  Interlocked to be idempotent.
+#   Returns	Nothing.
+sub prestuff {	#CommonFile
+    my($this, $which0) = @_;
+    my $which = $which0 & ~$this->{stuff};	# Each set is only done once
+    $this->{stuff} |= $which;
+    barf(0160, sub {"CommonFile(%s) prestuff(%d) (will do %d)\n    tree %s\n", 
+	$this->{fname}, $which0, $which, $opt->{b}});
+    my $nkey = scalar(@{$this->{keys}});
+    my $dk;
+		# Stuff the realm containers (if requested).
+    if ($which & 1) {
+	$this->stuffcom(0, $this->containerent());
+	$dk = scalar(@{$this->{keys}}) - $nkey;
+	$nkey += $dk;
+	barf(0160, sub {"    Prestuffed %d realm containers, %d total\n", 
+	    $dk, $nkey});
+    }
+		# Read the input file and save its content.
+    if ($which & 2) {
+	my($entry, @entries);
+	while ($entry = $this->read(1)) {
+	    push(@entries, $entry) if ref($entry);	# Bypass error returns
+	    barf(2, "Giving up due to -B switch (CommonFile::prestuff)\n"), 
+		last if $opt->{errcode} && $opt->{B};
+	}
+	$this->stuffcom(1, \@entries);
+	$dk = scalar(@{$this->{keys}}) - $nkey;
+	$nkey += $dk;
+	barf(0160, sub {"    Prestuffed %d content Entries, %d total\n", 
+	    $dk, $nkey});
+    }
+    barf(0160, sub {"    Already prestuffed everything, %d Entries\n", 
+	    $nkey} ) unless $which;
+}
+
+# Returns the prestuffed entry with a particular Distinguished Name.  Args:
+#   $this	Class object reference.
+#   $dn		Targeted Distinguished Name as a string, or Entry ref from
+#		which the DN is obtained.
+#   Returns	Entry from the LDAP table, or undef if DN is not found.
+sub getent {	#CommonFile
+    my($this, $dn) = @_;
+    my $dnsub = eval {$dn->can('dn')};
+    $dn = &$dnsub($dn) if $dnsub;	# Skip this if it's already a string.
+    $this->{E}{$dn};
+}
+
+# Creates an Entry containing the differences between $e1 and $e2 which, when
+# its update method is called, will change $e2 to be a copy of $e1.  (Or if the
+# U flag is on an attribute, $e2 and $e1 are unionized.)  Only
+# attributes relevant to this output channel's format are considered.  If
+# $e1 has an attribute with a value of '', it is deleted from $e2 if present
+# (and is not added or replaced).  If an attribute has multiple values, 
+# duplicates are removed (case insensitive comparison).  Args:
+#   $this	Class object ref. for the output channel.  
+#   $e1		Ref. to "input" Entry.
+#   $e2		Ref. to "pre-existing" Entry.  Either could be undef if not
+#		present in the respective file. Bizarrely, both could be undef.
+#   $union	If false, the result turns (a clone of) $e2 into a copy of $e1.
+#		If true, the clone becomes the union of $e2 and $e1.  Take this
+#		from the primary key's {PF}{U} flag.  
+#   Returns	Difference Entry object, or undef if $e1 is the same as $e2.
+sub diffentry {	#CommonFile
+    my($this, $e1, $e2, $union) = @_;
+    my ($attr, $e);
+    my $eany = $e1 || $e2;			# Whichever entry is not undef
+    my $fmt = $eany ? FlatFormat->auto('getfmt', $eany) : $this->{fmt};
+    my $rc = 0;					# Nonzero if any diffs found
+    my $dn = $eany ? $eany->dn() : 'both_entries_undef';
+    my @attrs = $eany ? FlatFormat->auto('attrs', $eany) : ();
+    if (!$eany) {
+	# Both Entries are undef, let it return undef.  Sometimes this happens.
+    } elsif (!$e1) {
+		# No $e1, yes $e2 -> toss Entry on server.  
+	$e = Net::LDAP::Entry->new($dn);
+	$e->changetype('delete');
+	$rc++;
+    } elsif (!$e2) {
+                # No $e2 -> add $e1.  But in some cases (/etc/rpc) there are
+		# duplicate values that we can't change in the flat file, case
+		# conflicts, and illegal values of ''.  Get rid of them now.
+	$e = Net::LDAP::Entry->new($dn);
+	$e->changetype('add');
+	foreach $attr (@attrs) {
+	    my $cie1 = CiEntry->new($e1, $attr);
+	    my $vals = $cie1->vals();
+	    $e->add($attr, $vals) if @$vals;	# Could end up with 0 values
+	}
+	$rc++;
+    } else {
+		# Both entries exist.  Need to modify $e2 to be like $e1.
+		# Or if the primary key has the U flag, merge $e1 into $e2
+		# taking their union (if requested).  
+	$e = $e2->clone();
+	$e->changetype('modify');
+	$rc += $this->union($e1, $e, $union);
+    }
+    $rc ? $e : undef;
+}
+
+# ======
+package FlatFile;
+use base qw(CommonFile);
+# This package handles translation between LDAP tables and flat files. 
+# See CommonFile for object hash members.  
+
+BEGIN { *opt = \$Opt::opt; *barf = \&Barf::barf; }
+
+# Constructor.  Args:
+#   $class	Name of class (FlatFile)
+#   $fmt	Ref. to FlatFormat object giving the format of the file.
+#   $mode	Mode string to open the file, 'r' or 'w'.
+#   $fname	Filename to be opened.
+#   Returns	New class object
+sub new {	#FlatFile
+    my($class) = shift @_;
+    my $this = $class->SUPER::new(@_);
+    $this->{type} = 'flat';
+    $this;
+}
+
+# Reads the flat file.  Args:
+#   $this	Class object reference.
+#   $nocache	Do not return any cached entries (for prestuff).
+#   Returns	An Entry object, or undef at end of file.  This subroutine
+#		takes care of error messages that prevent production of a
+#		valid Entry, and complaints about a primary key that is not
+#		unique in the flat file, but conflicts with the LDAP table
+#		can't be recognized.  
+sub read {	#FlatFile
+    my($this, $nocache) = @_;
+		# If there are remaining prestuffed entries, return them first.
+    my $entry = (!$nocache && @{$this->{keys}}) ? 
+				$this->{E}{pop(@{$this->{keys}})} : undef;
+    my $dbmsg = "EOF\n";
+    my $line = '';
+    my $line1;
+    while (!$this->{eof}) {
+	last if $entry;
+	$this->{lineno}++;
+	$line1 = $this->{FH}->getline();
+	if (defined($line1)) {
+	    $line .= $line1;
+	} else {
+	    ++$this->{eof};
+	    last if $line eq '';
+	}
+			# A line ending in backslash newline means that the
+			# next line should be joined to it, replacing the \\\n
+			# with one blank.  (Only used for netgroup.)
+	if (substr($line, -2) eq "\\\n") {
+	    substr($line, -2) = ' ';
+	    redo;
+	}
+			# Turn the line into a LDAP entry.
+	$entry = $this->{fmt}->split($line, $this->{lineno});
+	$line = '';			# Lose line, if it gets tossed.
+	if (ref($entry)) {
+	    barf(0100, "FlatFile->read: %s", $line);
+	    my $rdn = $entry->get_value($this->{fmt}{prikey});
+	    if ($this->{E}{$rdn} && $this->{uniq}) {
+		barf(2,"line %d: duplicate key '%s' skipped, earlier at line %d\n", 
+		    $this->{lineno}, $rdn, $this->{E}{$rdn});
+	    } else {
+		$this->{E}{$rdn} = $this->{lineno};
+		last;		# Accept this entry.
+	    }
+	} elsif ($entry ne '') {
+	    barf(2, "line %d: %s\n", $this->{lineno}, $entry); #(show error msg)
+	    $opt->{errcode} |= 4;
+	    $dbmsg = "(input error)\n";
+	    last if $opt->{B};
+	    # (return undef instead of an Entry object)
+	}
+    }
+    barf(0100, sub { "FlatFile->read: %s", 
+	($entry ? $this->{fmt}->join($entry) : $dbmsg)});
+    return $entry;
+}
+
+# Returns the line number that produced the most recent Entry.  Args:
+#   $this	Class object reference.
+#   Returns	An integer.
+sub lineno {	#FlatFile
+    $_[0]->{lineno};
+}
+
+# Writes out an entry.  Args:
+#   $this	Class object reference.
+#   $e1		Ref. to Entry object to be written out.
+#   $e2		Existing content (should be impossible on a flat file).
+#   $ediff	Difference between $e1 and $e2 (result of diffentry($e1,$e2)).
+#		Could be undef if they are identical.  (Not used here.)
+#   Returns	0 on success, 2 in the unlikely event of failure.
+sub write {	#FlatFile
+    my($this, $e1, $ediff) = @_;
+    my $rc = 0;				# Eventual return code
+    $this->{lineno}++;
+    my @line = $this->{fmt}->join($e1);
+    barf(0140, "FlatFile->write, line %3d: %s", $this->{lineno}, join('    ', @line));
+    $this->{FH}->print(@line) or $opt->{errcode} |= ($rc = 2);
+    $rc;
+}
+
+# Writes out (on $this->{FH}) the difference between 2 entries.  The output is
+# like from the "diff" utility: 0, 1 or 2 flat file lines with prefixes telling
+# which file they came from.  Args:
+#   $this	Class object reference.
+#   $e1		Ref. to "input" Entry.
+#   $e2		Ref. to "pre-existing" Entry.  Either could be undef if not
+#		present in the respective file.
+#   $ediff	Difference between $e1 and $e2 (result of diffentry($e1,$e2)).
+#		Could be undef if they are identical.  (Not used here.)
+#   Returns	0 if entries are identical, 1 if not, 2 for an error.  
+our @prefixes; BEGIN { 
+    @prefixes = ('X  ', 'X  ', '<< ', 'X  ', '>> ', 'X  ', '<  ', '>  ');
+}
+sub wdiff {	#FlatFile
+    my($this, $e1, $e2, $ediff) = @_;
+    my @es = ($e1, $e2);
+    my (@eouts, @canons, @exist);
+    foreach my $e (@es) {
+	push(@exist, $e ? 1 : 0);
+	my @eout = $e ? $this->{fmt}->join($e) : ("(undefined entry)\n");
+	push(@eouts, \@eout);
+	my @canon = @eout;
+	foreach $_ (@canon) {
+	    $_ =~ s/\s+/ /g;
+	}
+	push(@canons, join(' ', sort @canon));
+    }
+    my $rc = ($canons[0] eq $canons[1]) ? 0 : 1;	#0 = identical
+    return $rc if !$rc && !($opt->{d} & 0100);
+		# Unequal lines need to be printed.  Also if debug flag is on.
+    my $ipr = 2*$exist[0] + 4*$exist[1];
+    foreach my $eo (@eouts) {
+	my $pfx = $prefixes[$ipr++];
+	next if substr($pfx,0,1) eq 'X';
+	foreach my $line (@$eo) {
+	    $this->{FH}->print($pfx . $line) or $opt->{errcode} |= ($rc = 2);
+	}
+    }
+    $rc;
+}
+
+# ======
+package LdifFile;
+use base qw(CommonFile);
+# This package reads/writes LDAP Entries in LDIF format.  
+# The LdifFile object is a hash with these members:
+#   fname   Name of the LDIF file as given in the -i or -o option.
+#   mode    PERL mode string used to open the file: 'r' = read, 'w' = write.
+#   fmt	    FlatFormat object describing the (non-LDIF) file format.
+#   FH	    FileHandle open on {fname} (not to be used independent of {FD}).
+#   FD	    LDIF object reference, connected to {FH} which is open on {fname}.
+#   eof	    True if file is at the end (input only).  
+#   E	    Keys are RDNs seen in the returned Entries (for uniqueness
+#	    checking), values are 1.  
+#   lineno  Line number in the file which produced the most recent Entry. 1
+#	    origin, i.e. the first line is designated "1".  Sorry,
+#	    current_lines() etc. are documented in Net::LDAP::LDIF but not
+#	    actually implemented, so we can't keep track of the line number.
+#   linedelta  Number of lines in the most recent entry (to be added to
+#	    {lineno} on the next I/O operation).  
+
+BEGIN { *opt = \$Opt::opt; *barf = \&Barf::barf; }
+
+use Net::LDAP::LDIF;
+use FileHandle;
+
+# Constructor.  Args:
+#   $class	Name of class (LdifFile)
+#   $fmt	Ref. to FlatFormat object 
+#   $mode	Mode string to open the file, 'r' or 'w'.
+#   $fname	Filename to be opened.
+#   Returns	New class object
+sub new {	#LdifFile
+    my($class, $fmt, $mode, $fname) = @_;
+    my $this = $class->SUPER::new($fmt, $mode, $fname);
+    $this->{type} = 'ldif';
+    my @fdargs = (qw(encode base64  sort 1  onerror), undef);
+    push(@fdargs, qw(change 1)) if $opt->{c} && $mode eq 'w';
+			# (Not sure if we need raw => qr/regexp/ )
+    $this->{FD}	= Net::LDAP::LDIF->new($this->{FH}, $mode, @fdargs);
+    barf(3, "Failed to initialize LDIF object from %s: %s\n",
+	$fname, $this->{FD}->error()) if $this->{FD}->error();
+		# It could happen that the file starts out at EOF, e.g. a file
+		# with only blank lines and comments, or 0 length.
+    $this->{eof} = $this->{FD}->eof();
+    $this;
+}
+
+# Reads the LDIF file.  Args:
+#   $this	Class object reference.
+#   $nocache	Do not return any cached entries (for prestuff).
+#   Returns	An Entry object, or undef at end of file.  This subroutine
+#		takes care of error messages that prevent production of a
+#		valid Entry, and complaints about a primary key that is not
+#		unique in the LDIF file.
+sub read {	#LdifFile
+    my($this, $nocache) = @_;
+		# If there are remaining prestuffed entries, return them first.
+    my $entry = (!$nocache && @{$this->{keys}}) ?
+				$this->{E}{pop(@{$this->{keys}})} : undef;
+    my $FD = $this->{FD};
+    my $dbmsg = "EOF\n";
+    while (!$this->{eof}) {
+	last if $entry;
+	$this->{lineno}++;			# Actually a count of entries
+	$entry = $FD->read_entry();		# Read the next Entry.
+	$this->{eof} = $FD->eof();
+	if ($FD->error()) {
+	    barf(2, "LDIF input error in entry nbr %d: %s\n", 
+		$this->{lineno}, $FD->error());
+	    $opt->{errcode} |= 4;
+	    $dbmsg = '(input error)';
+	    undef $entry;
+	    last if $opt->{B};
+	} elsif (defined($entry)) {
+	    $entry->{util_lineno} = $this->{lineno};	# Cowboy pgmg, save line number
+	    barf(0100, sub { "LdifFile->read (entry %2d): %s", $this->{lineno}, $this->{fmt}->join($entry) });
+	    my $dn = $entry->dn();		# Distinguished Name of Entry
+	    my $oldent = $this->{E}{$dn};	# Seen this one before?
+	    if ($oldent) {
+		barf(2, 
+		    "LDIF duplicate DN (%s) (skipped) at entry %d, keeping %d\n", 
+		    $dn, $this->{lineno}, $oldent->{util_lineno});
+		$opt->{errcode} |= 4;
+		$dbmsg = "(duplicate entry)\n";
+		undef $entry;
+	    } else {
+		$this->{E}{$dn} = $entry;	# Remember where we saw it
+		last;				# Accept this Entry
+	    }
+	}
+    }
+    barf(0100, sub { "LdifFile->read: %s", ($entry ? $this->{fmt}->join($entry) : $dbmsg)});
+    $entry;
+}
+
+# Returns the line number that produced the most recent Entry.  Args:
+#   $this	Class object reference.
+#   Returns	An integer.
+sub lineno {	#LdifFile
+    $_[0]->{lineno};
+}
+
+# Writes out an entry.  Args:
+#   $this	Class object reference.
+#   $e1		Ref. to Entry object to be written out.
+#   $e2		Existing content (should be impossible on a LDIF file).
+#   $ediff	Difference between $e1 and $e2 (result of diffentry($e1,$e2)).
+#		Could be undef if they are identical.  (Not used here.)
+#   Returns	0 on success, 2 in the unlikely event of failure.
+# (write_entry() does not store the output lines so current_lines can return
+# them, so no line numbers on output.)
+sub write {	#LdifFile
+    my($this, $e1, $ediff) = @_;
+    my $FD = $this->{FD};
+    $this->{lineno}++;
+    barf(0140, sub { "LdifFile->write (entry %3d): %s", $this->{lineno}, $this->{fmt}->join($e1) });
+    $FD->write_entry($e1);	# Error return if any is not documented
+    my $rc = 0;
+    barf(2, "LDIF output error (entry %d): %s\n", $this->{lineno}, 
+				$FD->error()), ($opt->{errcode} |= ($rc = 2))
+						if $FD->error();
+    $rc;
+}
+
+# Writes out (on $this->{FH} through $this->{FD}) the difference between 2
+# entries so $e2 could be updated to become a copy of $e1.  The output is LDIF
+# of a difference Entry, which could be fed to ldapmodify.  Args:
+#   $this	Class object reference.
+#   $e1		Ref. to "input" Entry.
+#   $e2		Ref. to "pre-existing" Entry.  Either could be undef if not
+#		present in the respective file.
+#   $ediff	Difference between $e1 and $e2 (result of diffentry($e1,$e2)).
+#		Could be undef if they are identical.
+#   Returns	0 if entries are identical, 1 if not, 2 for an error.  
+sub wdiff {	#LdifFile
+    my($this, $e1, $e2, $e) = @_;
+    my $FD = $this->{FD};
+    my $rc;
+    if (!defined($e)) {
+	$rc = 0;
+	if ($opt->{d} & 0100) {
+	    barf(0100, "# DN = %s identical entries\n", $e1->dn());
+	    $this->{FH}->printf("# DN = %s identical entries\n", $e1->dn());
+	}
+    } else {
+	barf(0140, sub { "LdifFile->wdiff:\n  < %s  > %s", 
+	    $this->{fmt}->join($e1), $this->{fmt}->join($e1)} );
+	$FD->write_entry($e);		# Error return if any is not documented
+	$rc = 1;
+	barf(2, "LDIF output error (entry %d): %s\n", $this->{lineno}, 
+				$FD->error()), ($opt->{errcode} |= ($rc = 2))
+						if $FD->error();
+    }
+    $rc;
+}
+
+# Prints an entry as LDIF, for debugging.  Args:
+#   $class	Name of class (static member function)
+#   \*FH	Open filehandle or type glob for the output file.
+#   $entry	Ref. to the Net::LDAP::Entry object to be printed.
+#   $title	A line to come before the entry (optional).
+sub print {	#LdifFile
+    my($class, $FH, $entry, $title) = @_;
+    $FH->print($title) if $title;
+    $FH->print("Attrs: '", join("', '", sort $entry->attributes()), "'\n");
+    my $FD = Net::LDAP::LDIF->new($FH, 'a', onerror => 'warn', sort => 1);
+    $FD->write_entry($entry);
+    # (Automatically detaches from $FH when finished)
+}
+
+# ======
+package LdapIO;
+use base qw(CommonFile);
+# This package obtains LDAP Entries from a LDAP table, or updates the table
+# with the new Entry content.  Package object data members:
+#   LDAP	LDAP package object ref.
+#   ermsg	Error message from last failing operation
+#   search	Message object representing the search results.
+#   E		Ref. to hash keyed by Distinguished Name containing the
+#		Entries returned by the search.  
+#   keys	Ref. to array of Distinguished Names; the last one must be
+#		created first in an empty table.  
+
+BEGIN { *opt = \$Opt::opt; *barf = \&Barf::barf; }
+
+use Net::LDAP;
+use Net::LDAP::Entry;
+use FileHandle;
+use Authen::SASL;
+
+our %openopt;					# Options for LDAP connection
+our %bindopt;					# Options for bind operation
+our %tlsopt;					# Options for starting TLS
+
+# Opens a connection to the LDAP server.  Args:
+#   $class	Name of class (LdapIO).
+#   $fmt	Ref. to FlatFormat object 
+#   $mode	Mode string to open the file, 'r' or 'w'.
+#   $fname	Filename to be opened (always undef for LdapIO)
+#   Returns	LdapIO object with an open connection.
+sub new {	#LdapIO
+    my($class) = shift @_;
+    my $this = $class->SUPER::new(@_);
+    $this->{type} = 'ldap';
+    $this->{fname} = "LDAP table ${$opt}{f}";
+    $this->{ermsg} = '';
+		# Connect to the LDAP server(s).
+    $openopt{onerror} = undef;		# Failing method will return undef
+    my $HOST = delete $openopt{HOST};
+    barf(020, sub { "LdapIO->new: connect to %s\n", join(' ', @$HOST) });
+    $this->{LDAP} = Net::LDAP->new($HOST, %openopt);
+    $openopt{HOST} = $HOST;
+    barf(3, "Can't connect to LDAP server (%s): %s\n", 
+	$opt->{H}, $this->{ermsg}) unless $this->{LDAP};
+		# Start TLS when needed for security (which it usually is).
+    my $mesg;
+    TLS: {
+	barf(030, "Not doing StartTLS\n"), last unless $tlsopt{verify};
+	barf(030, "LdapIO->new starting TLS\n");
+	$mesg = $this->{LDAP}->start_tls(%tlsopt);
+	last unless $mesg->is_error();
+	barf(3, "Failed to start TLS: %s\n", $mesg->error());
+    }
+		# Bind (authenticate) to the server.
+    my $BINDDN = delete $bindopt{BINDDN};
+    barf(020, "Bind to server as %s\n", ($BINDDN || 'anonymous'));
+    $mesg = $BINDDN ? $this->{LDAP}->bind($BINDDN, %bindopt) : 
+			$this->{LDAP}->bind();
+    barf(3, "Failed to bind to LDAP server as %s: %s\n",
+	    ($BINDDN || 'anonymous'), $mesg->error())
+		if $mesg->is_error();
+    $bindopt{BINDDN} = $BINDDN if $BINDDN;
+    barf(020, "LdapIO->new finished\n");
+    $this;
+}
+
+# Reads the next Entry and returns it, or undef when all have been read.
+sub read {	#LdapIO
+    my($this) = @_;
+    my $dn = pop(@{$this->{keys}});
+    return undef unless $dn;
+    my $entry = $this->{E}{$dn};
+    barf(0100, sub { "LdapIO->read: %s", ($entry ? $this->{fmt}->join($entry) : "EOF\n")});
+    $entry;
+}
+
+# Reads the entire table and saves Entries in the {E} member.  Args:
+#   $this	Class object ref.
+#   $which	Sum of bits: 1 = include realm containers, 2 = read the
+#		content (leaf nodes).  Interlocked so each is only done once.
+#   Returns	Nothing.
+sub prestuff {	#LdapIO
+    my($this, $which0) = @_;
+    my $which = $which0 & ~$this->{stuff};	# Each set is only done once
+    $this->{stuff} |= $which;
+    barf(0160, sub {"LdapIO(%s) prestuff(%d) (will do %d)\n    tree %s\n", 
+	$this->{fname}, $which0, $which, $opt->{b}});
+    my $nkey = scalar(@{$this->{keys}});
+    my $dk;
+                # For reading, there has to be something to read.  For writing,
+		# we have to know what's already in the table (if anything) in
+		# order to update it.  Do two searches: First retrieve the
+		# containers representing the search base, then the subtree
+		# under the base.  It's not an error if the realm container
+		# hasn't been created yet.
+    my ($mesg, @entries);
+    SEARCH: {
+		# First get the realm containers.  (If requested.)
+	my($dn, $dns);
+	if ($which & 1) {
+	    $dns = $this->containerdn();
+	    pop @$dns;			# Lose the OU container.
+	} else {
+	    $dns = [ ];
+	}
+	foreach my $dn (@$dns) {
+	    $mesg = $this->{LDAP}->search(base => $dn, scope => 'base',
+			filter => '(objectClass=*)');
+	    barf(2, "Search failed for %s: %s (ignored)\n", 
+		$opt->{b}, $mesg->error()), last if $mesg->is_error();
+	    my @entries = $mesg->entries();
+	    barf(2, "Search for DN=%s returned %d entries, must be 1\n",
+		$dn, scalar(@entries)), last SEARCH unless @entries == 1;
+	    barf(2, "Sought DN=%s, got DN=%s, this is wacko\n"), last SEARCH
+		if $entries[0]->dn() ne $dn;
+	    my $lineno = 0;
+	    foreach my $e (@entries) {
+		$e->{util_lineno} = ++$lineno;	# Cowboy pgmg, save line number
+	    }
+	    $this->stuffcom(0, \@entries);
+	    $dk = scalar(@{$this->{keys}}) - $nkey;
+	    $nkey += $dk;
+	    barf(0160, sub {"    Prestuffed %d realm containers, %d total\n", 
+		$dk, $nkey});
+	}
+		# Now search for the content, including the OU container.
+	last SEARCH unless $which & 2;
+	$mesg = $this->{search} =
+		$this->{LDAP}->search(base => $opt->{b}, scope => 'sub',
+		    filter => '(objectClass=*)');
+	barf(2, "Search failed for OU = %s: %s (ignored)\n", 
+	    $opt->{b}, $mesg->error()), last
+		if $mesg->is_error();
+	my $entries = [ $mesg->entries() ];
+		# Toss the pseudo-OU container unless full tree is being done
+		# in this execution.
+	if (!($which & 1)) {
+	    foreach my $i (0..$#{$entries}) {
+		next if $entries->[$i]->dn() ne $opt->{b};
+		splice(@$entries, $i, 1);
+		last;
+	    }
+	}
+	$this->stuffcom(1, $entries);
+	$dk = scalar(@{$this->{keys}}) - $nkey;
+	$nkey += $dk;
+	barf(0160, sub {"    Prestuffed %d content Entries, %d total\n", 
+	    $dk, $nkey});
+    }
+    barf(0160, sub {"    Already prestuffed everything, %d Entries\n", 
+	    $nkey} ) unless $which;
+}
+
+# Sends out an entry for updating.  Args:
+#   $this	Class object reference.
+#   $e1		The entry to be updated.  Undef means remove $e2 from the
+#		server.  
+#   $e2		Existing content for this Distinguished Name, or undef if none.
+#   $ediff      Difference between $e1 and $e2 (result of diffentry($e1,$e2)).
+#		Could be undef if they are identical, in which case writing is
+#		skipped.  This subroutine saves $ediff in $this->{E}{$dn}.
+#   \@rcs       What to return in these cases, array of 3 items: [0] if entries
+#		are equal, [1] if unequal, [2] on a write failure.  [3] is the
+#		name (text) of the caller, for error messages.
+#   Returns	The value from \@rcs according to the outcome.
+sub writecore {	#LdapIO
+    my($this, $e1, $e2, $e, $rcs) = @_;
+    my $rc = 0;				# Subscript in @$rcs
+    UPDATE: {
+	barf(2, sub {("%s%s %s\n", ($opt->{n} ? "would " : ''), 
+		($e ? $e->changetype() : 'skip'), 
+		(($e1 || $e2) ? ($e1 || $e2)->dn() : 'nonexistent entry'))})
+			if (($opt->{n} || $opt->{d} & 040) && $e) 
+				|| $opt->{d} & 0100;
+	last if !$e;				# If entries already identical
+	$rc = 1;
+	last if $opt->{n};			# Bypass updating if -n
+	my $mesg = $e->update($this->{LDAP});
+	if ($mesg->is_error()) {
+	    $opt->{errcode} |= ($rc = 2);
+	    barf(2, "Failed to %s %s: %s\n", 
+		$e->changetype(), $e->dn(), $mesg->error());
+	    LdifFile->print(\*STDERR, $e, "Failing entry:\n");
+	} else {
+		# Seems to be OK.  Update prestuff stuff.  Example: the flat
+		# file has multiple rows for the same primary key, and they
+		# produce multiple values for some attribute.
+	    $this->stuffcom(2, [$e]);
+	}
+    }
+    $rcs->[$rc];
+}
+
+# Writing an Entry to the table.  (Use wdiff to remove an Entry.)  Args:
+#   $this	Class object reference.
+#   $e1		The entry to be updated.  
+#   $e2		Existing content of the table (not actually used).
+#   $ediff	Difference between $e1 and $e2 (result of diffentry($e1,$e2)).
+#		Could be undef if they are identical.
+#   Returns	0 if write succeeded, 2 if failed.
+my @writerc; BEGIN { @writerc = (0, 0, 2, 'write'); }
+sub write {	#LdapIO
+    my($this, $e1, $e2, $ediff) = @_;
+    $this->writecore($e1, $e2, $ediff, \@writerc);
+}
+
+# Update the table.  Specifically this is called to remove Entries.  Args:
+#   $this	Class object reference.
+#   $e1		The entry to be updated.  Undef means remove $e2 from the
+#		server.  
+#   $e2		Existing content for this Distinguished Name, or undef if none.
+#   $ediff	Difference between $e1 and $e2 (result of diffentry($e1,$e2)).
+#		Could be undef if they are identical.
+#   Returns	0 for equal Entries, 1 if unequal, 2 for an error.
+my @wdiffrc; BEGIN { @wdiffrc = (0, 1, 2, 'wdiff'); }
+sub wdiff {	#LdapIO
+    my($this, $e1, $e2, $ediff) = @_;
+    $this->writecore($e1, $e2, $ediff, \@wdiffrc);
+}
+
+# Stuff an option in override order.  Args:
+#   \%hash	A hash of options
+#   $member	Key in that hash where the value goes
+#   @values	The first of these which is defined is stored in that member.
+#		Except if the member is already set, it is not changed.
+#   Returns	The value in the hash (undef if it didn't get set)
+sub oropt {	#LdapIO
+    my($hash, $member) = splice(@_, 0, 2);
+    foreach my $val (@_) {
+	last if defined($hash->{$member});
+	$hash->{$member} = $val;
+    }
+    $hash->{$member};
+}
+
+# Initializes the various connection parameters.
+sub default {	#LdapIO
+    my($class) = @_;
+    my $rc = 1;				# The eventual return value
+		# Decide which host(s) to connect to and convert to a list.
+    HOST: {
+	last if $opt->{H};		# -H URI list was given, use it.
+	if ($opt->{h}) {		# -h host was given, convert to URI
+	    $opt->{H} = "ldap://" . $opt->{h};
+	    $opt->{H} .= ':' . $opt->{p} if $opt->{p};
+	    last;
+	}
+	&oropt($opt, 'H', $opt->{uri}, $opt->{host}) and last;
+	barf(2, "Can't discover server's URI, fix %s (HOST or URI parm) or specify -H\n", 
+	    join(' ', @{$opt->{conf}}));
+	$rc = 0;
+	$opt->{H} = "ldap://unknown-server"; # Avoid messages about undef string
+    }
+    $openopt{HOST} = [ split(' ', $opt->{H}) ];
+		# Extract generic open options from LDAP configuration.
+    &oropt(\%openopt, 'timeout', $opt->{timeout});
+		# Extract bind options from the LDAP configuration.  If 
+		# there are no options, binding is anonymous.
+		# Password extensions: BINDPW gives the password, and 
+		# BINDPWFILE gives the name of a file to read it from.
+    PASSWD: {
+	last unless $opt->{x};		# Password is only for simple auth.
+	my $FD;
+		# If we're reading the password from the TTY.
+		# The newline at the end is not part of the password. 
+	FROMTTY: {
+	    last unless ($opt->{W});
+	    $FD = FileHandle->new("/dev/tty", '+>') or 
+		barf(3, "Can't read password from /dev/tty: %s\n", $!);
+	    $FD->print("Password: ");
+	    $FD->flush();
+	    system "stty -F /dev/tty -echo";	# Turn off echo
+	    chomp ($bindopt{password} = <$FD>);
+	    system "stty -F /dev/tty echo";	# Turn on echo
+	    barf(3, "Error reading password from /dev/tty: %s\n", 
+		$! || 'empty password') unless $bindopt{password};
+	    $FD->close();
+	    last PASSWD;
+	}
+		# If the password is on the command line:
+	&oropt(\%bindopt, 'password', $opt->{w}, $opt->{bindpw}) and last;
+                # Reading the password from a file.  The ending newline (if
+		# present) is included as part of the password.  The file could
+		# have multiple lines.
+	my $pwfile = $opt->{y} || $opt->{bindpwfile};
+	last unless $pwfile;
+	$FD = FileHandle->new($pwfile) or do {
+		barf(2, "Can't read %s: %s\n", $pwfile, $!);
+		$rc = 0;
+		last;
+	    };
+	$bindopt{password} = join('', <$FD>);
+	$FD->close();
+    }
+    ++$bindopt{anonymous} if $opt->{x} && !exists($bindopt{password});
+		# For a SASL bind, BINDDN is syntactically required but is
+		# ignored by SASL.  For a simple bind, if there is a password
+		# then BINDDN is required.  -W counts as having a password. 
+		# For a simple bind with no password, BINDDN must be omitted.
+    if (!$opt->{x} || $bindopt{password}) {
+	&oropt($opt, 'D', $opt->{binddn}, 
+	    "uid=$ENV{USER},ou=People,${$opt}{base}");
+	$bindopt{BINDDN} = $opt->{D};
+    }
+		# Handle SASL authentication.  
+		# The following advertised options are not actually honored:
+		#   -O secprop	SASL security properties
+		#   -R realm	SASL realm
+                # Check if GSSAPI works -- yes it does.
+    if (!$opt->{x}) {
+	my $class = "Authen::SASL";
+	my (%saslargs, %callbacks);
+	&oropt(\%callbacks, 'user', $opt->{U}, $ENV{USER});
+	&oropt(\%callbacks, 'auth', $opt->{X}, $callbacks{user});
+#OBSOLETE	&oropt(\%callbacks, 'authname', $callbacks{auth}); #For GSSAPI
+	&oropt(\%saslargs, 'mechanism', $opt->{Y});
+	$saslargs{callback} = \%callbacks;
+	$bindopt{sasl} = $class->new(%saslargs);
+    }
+		# StartTLS option setup.  LdapIO::new should detect if TLS is 
+		# required by looking at $tlsopt{verify}; if missing, TLS is 
+		# not needed.  TLS is required if requested by the user or
+		# if a password was or will be provided.  Basically, required
+		# except for anonymous access.  
+    if ($opt->{Z} || !$opt->{x} || $opt->{W} || $opt->{y} || $opt->{Y} || 
+				$bindopt{password} || $bindopt{binddn}) {
+	$tlsopt{verify} = 'require';
+	# $tlsopt{checkcrl} = 0;	# Hiss, boo, need to set this up
+	# $tlsopt{ciphers} = 'ALL';	# How do we demand strength > 0?
+	&oropt(\%tlsopt, 'cafile', $opt->{tls_cacert}) or
+	    &oropt(\%tlsopt, 'capath', $opt->{tls_cacertdir}) 
+	    or do {
+	    barf(2, "Missing TLS parameters (TLS_CACERT or TLS_CACERTDIR)\nneeded in %s\n",
+		join(' ', @{$opt->{conf}}));
+	    $rc = 0;
+	};
+    }
+    $rc;
+}
+BEGIN { push(@Opt::defaults, 'LdapIO', \&default); }
+
+# ======
+package Activity;
+# Represents a LDAP table upon which various activities can be done.  
+# Package object data members:
+#   base	Distinguished Name elements to be appended to the RDN.
+#   format	FlatFormat object describing the flat format file.
+#   infd	Ref. to I/O channel object for the main input.
+#   cmpfd	Ref. to I/O channel object for the comparison input (-c only).
+#   outfd	Ref. to I/O channel object for the output. 
+#   stat	Hash of statistics, number of records in these categories:
+#		in	Read from infd
+#		cmp	Read from cmpfd
+#		out	Read from outfd (prestuff)
+#		unequal	Number of unequal records incl. missing ones
+#		modify	Number of unequal records excluding missing ones
+#		add	Records in "in" that aren't in cmp or out
+#		delete	Records in cmp or out that aren't in "in"
+#		equal	Number of equal records
+#		error	Number of write errors (doesn't count read errors)
+
+use Net::LDAP::Entry;
+
+BEGIN { *opt = \$Opt::opt; *barf = \&Barf::barf; }
+
+# Logic for opening files:
+#   If we have -c, open {i} and {c} for reading.  {o} if present is a file 
+#	opened for output, otherwise output goes to stdout.  Output involves 
+#	generating diffs.  
+#   Otherwise, open {i} for reading and {o} for writing.  Either one missing
+#	means to read or write the LDAP table.  
+#   -k means to go through the table and delete/report entries that aren't in
+#	the input.  
+
+# Constructor.  Most of the stuff is interpreted from the options.  Args:
+#   $class	Name of class (Activity).
+#   Returns	New Activity object.
+sub new {	#Activity
+    my($class) = @_;
+    barf(020, "Activity->new starting, table %s\n", 
+	($opt->{f} || $opt->{F}));
+    my $this = bless({
+	    base	=> $opt->{b},
+	    format	=> FlatFormat->auto('getfmt', 'xx=xx,' . $opt->{b}),
+	    stat	=> { qw(in 0 cmp 0 out 0 unequal 0 modify 0 add 0 delete 0 equal 0 error 0) },
+	}, $class);
+    my $fmt= $this->{format};
+		# Overriding decision whether a file is LDIF format.
+    my %opt_L = map {$_, 1} split(//, ($opt->{L} || ''));
+		# Open the various I/O channels.
+    my %ktl = qw(i infd  o outfd  c cmpfd);
+    my($m, $fd);
+    while (($m, $fd) = each %ktl) {
+	my $M = ($m eq 'o') ? 'w' : 'r';
+	$this->{$fd} = $opt->{$m} ?
+			# If the option is specified, open the file, as LDIF
+			# if the extension so indicates.
+	    (($opt->{$m} =~ /\.ldif$/ || $opt_L{$m}) ? 
+		LdifFile->new($this->{format}, $M, $opt->{$m}) :
+		FlatFile->new($this->{format}, $M, $opt->{$m})) :
+			# Option is not specified.  If not comparing, do not
+			# open comparison input.
+	    ($m eq 'c' && !$opt->{c}) ? undef :
+			# If comparing, output goes to stdout by default.
+	    ($m eq 'o' && $opt->{c}) ? FlatFile->new($this->{format}, $M, '-') :
+			# Otherwise, look at the LDAP table.  
+	    LdapIO->new($this->{format}, $M, undef);
+		# Bypass further setup (prestuff) for unused channels.
+	next unless $this->{$fd};
+		# Always prestuff input channel(s), and also the output channel
+		# if it's LdapIO.  Reason: for those tables which have multiple
+		# flat file records per LDAP Entry, we need to see all the 
+		# records before comparing/updating.  On LDAP output we don't
+		# replace entire entries, we send diffs to the server, so we
+		# need to know what's there already.  
+	$this->{$fd}->prestuff(2 + $opt->{a})
+	    if $m ne 'o' || (!$opt->{c} && !$opt->{$m});
+    }
+    barf(020, "Activity->new finished\n");
+    $this;
+}
+
+# The main thread should create the Opt object, create the Activity object, 
+# then call this method.  Return value is 0 for a successful copy, 1 if copy
+# failed; or 0 if all entries compare equal, 1 if they don't.  The activities
+# are very similar for comparing and copying.  
+sub activity {	#Activity
+#    return barf(2, "Error reading input data, Giving up due to -B switch\n") 
+#	|| 0 if $opt->{errcode} && $opt->{B};
+    my($this) = @_;
+    my($in1, $in2) = $opt->{c} ? qw(cmpfd infd) : qw(infd outfd);
+    my($st1, $st2) = $opt->{c} ? qw(cmp in) : qw(in out);
+    my $wdiff = $opt->{c} ? sub {$this->{outfd}->wdiff(@_)} : 
+			sub {$this->{outfd}->write(@_)};
+    my $rc = 0;			# Return code: number of differences or errors
+    my %checkoff;		# Key = DN, value (1 = in cmpfd) + (2 = in infd)
+    my $halt;			# For bailing out in case of errors.
+    my($e1, $e2, $ediff);
+		# Do the activity on records from input #1.
+    while ($e1 = $this->{$in1}->read()) {
+	next unless eval { $e1->isa('Net::LDAP::Entry') };
+	my $dn = $e1->dn();
+	$checkoff{$dn} = 1;
+	$e2 = $this->{$in2}->getent($dn);
+	$checkoff{$dn} += 2 if $e2;
+		# Difference between the records on the two channels.
+		# Never take their union (take unions during prestuff()).
+	$ediff = $this->{$in1}->diffentry($e1, $e2, 0);
+		# Count the records in each category.
+	$this->{stat}{$st1}++;			# Records in file 1
+	$this->{stat}{$st2}++ if $e2;		# Records in file 2
+	$this->{stat}{unequal}++ if $ediff;	# All kinds of unequal recs
+	my $ct = defined($ediff) ? $ediff->changetype() : 'equal';
+	$this->{stat}{$ct}++;			# Mutually exclusive disposition
+	if ($opt->{d} & 040 &&	# (0100 printout is handled by read())
+			FlatFormat->mash($e1) ne FlatFormat->mash($e2)) {
+	    barf(040, "Activity input:\n  < %s  > %s",
+		$this->{$in1}{fmt}->join($e1),
+		$this->{$in2}{fmt}->join($e2));
+	}
+	my $r = &{$wdiff}($e1, $e2, $ediff);
+	$rc++ if $r;
+	$this->{stat}{error}++ if $r >= 2; 
+    } continue {
+	$halt = $opt->{errcode} && $opt->{B}; 
+	barf(2, "Giving up due to -B switch\n"), last if $halt;
+    }
+    if ($opt->{k} && !$halt) {
+	while ($e2 = $this->{$in2}->read()) {
+	    my $dn = $e2->dn();
+	    next if $checkoff{$dn};
+	    $this->{stat}{$st2}++;	# Recs not read in previous phase
+	    if ($opt->{d} & 040) {	# (0100 printout is handled by read())
+		barf(040, "Activity input (kill):\n >> %s",
+		    $this->{$in2}{fmt}->join($e2));
+	    }
+			# write() can't kill entries, always use wdiff()
+	    $ediff = $this->{$in1}->diffentry(undef, $e2);
+	    my $r = $this->{outfd}->wdiff(undef, $e2, $ediff);
+	    $rc++;			# Killed entries always cause a change
+	    $this->{stat}{delete}++;
+	    $this->{stat}{error}++ if $r >= 2; 
+	} continue {
+	    $halt = $opt->{errcode} && $opt->{B}; 
+	    barf(2, "Giving up (-k) due to -B switch\n"), last if $halt;
+	}
+    }
+		# Result code:	-c		not -c
+		# 0	All records equal	All records written OK
+		# 1	Some records unequal	Some I/O errors
+    ($this->{stat}{$opt->{c} ? 'unequal' : 'error'} ? 1 : 0) | $opt->{errcode};
+}
+
+# Print statistics.  Args:
+#   $this	Class object ref.
+#   $flag	First argument to barf().
+#   Returns	Nothing (it prints the stats itself).
+sub printstat {	#Activity
+    my($this, $flag) = @_;
+    my($in1, $in2) = $opt->{c} ? qw(cmpfd infd) : qw(infd outfd);
+    my($st1, $st2) = $opt->{c} ? qw(cmp in) : qw(in out);
+    my %descr = (
+	equal	=> 'equal records',
+	unequal	=> 'unequal records including missing ones',
+	modify	=> 'unequal records excluding missing ones',
+	add	=> "records in '$st1' and not in '$st2'",
+	delete	=> "records not in '$st1' and in '$st2'",
+	error	=> "write failures",
+	);
+    unless ($opt->{c}) {
+	$descr{modify}	.= " (modified)";
+	$descr{add}	.= " (added)";
+	$descr{delete}	.= " (tossed)";
+    }
+    my %fd = qw(in infd  out outfd  cmp cmpfd);
+    my $f;
+    foreach $f ($st1, $st2) {
+	$descr{$f} = "records in '$f' = " . $this->{$fd{$f}}{fname};
+    }
+    foreach $f ($st1, $st2, qw(equal unequal modify add delete error)) {
+	barf($flag, "%5d  %s\n", $this->{stat}{$f}, $descr{$f});
+    }
+}
+
+# Print one-line stat summary.  Args:
+#   $this	Class object ref.
+#   $flag	First argument to barf().
+#   Returns	Nothing (it prints the stats itself).
+sub print1line {	#Activity
+    my($this, $flag) = @_;
+    my($in1, $in2) = $opt->{c} ? qw(cmpfd infd) : qw(infd outfd);
+    my($st1, $st2) = $opt->{c} ? qw(cmp in) : qw(in out);
+    my @descr = qw(
+	error	write_failures
+	delete	tossed
+	add	added
+	modify	changed
+	equal	equal
+	);
+    my %fd = qw(in infd  out outfd  cmp cmpfd);
+    my ($f, $d, $n);
+    my $msg = "updating ${$opt}{f}: ";
+    my @msgs;
+    while (@descr && (($f, $d) = splice(@descr, -2))) {
+	$n = $this->{stat}{$f};
+	push(@msgs, "$n $d") if $n;
+    }
+    push(@msgs, "no changes") if @msgs <= 1;
+    $msg .= join(', ', @msgs) . "\n";
+    barf($flag, $msg);
+}
+
+# Initialization, check consistency of file/table options.
+sub default {	#Activity
+    my($class) = @_;
+    my $rc = 1;
+    $opt->{a} ||= 0;			# Make sure $opt->{a} is defined.
+    unless ($opt->{i} || $opt->{o} || $opt->{c}) {
+	barf(2, "At least one of -i -o -c is required.\n") ;
+	$rc = 0;
+    }
+    if ($opt->{k} && $opt->{o} && !$opt->{c}) {
+	barf(2, "-k only works when comparing, or when updating LDAP (no -o file).\n");
+	$rc = 0;
+    }
+    $rc;
+}
+BEGIN { push(@Opt::defaults, 'Activity', \&default); }
+
+# ======
+package main;
+# The main thread.
+
+{
+    my $opt = Opt->new();
+    my $A = Activity->new();
+    my $rc = $A->activity();
+    $opt->{v} ? $A->printstat(2) : $opt->{q} ? undef : $A->print1line(2);
+    exit($rc);
+}
+
+
+1;	#Yes the module loaded.

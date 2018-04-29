@@ -1,0 +1,53 @@
+#!/usr/bin/perl -lw
+
+use strict;
+use Data::Dumper;
+
+my $iport = 13021;
+my $first = 1;
+my ($args,@cmds,$cmd);
+
+while ( my $arg = shift )
+{
+  if ( $arg =~ /^--/ )
+  {
+      $args = join(' ', @ARGV);
+      last;
+  }
+
+  if ( $arg =~ /^-/)
+  {
+    $args .= " $arg";
+  }
+  elsif ( $arg =~ /^((.+)@)?([^:]+):?(\d+)?$/ )
+  {
+    my $user = $1;
+    my $host = $3;
+    my $port = $4 || 22;
+
+    if ( $first )
+    {
+      $cmd   = sprintf('ssh %s%s -p %s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no', ($user||''), $host, $port);
+      $args  = '';
+      $first = 0;
+    }
+    else
+    {
+      $cmd  .= sprintf(' -L %s:%s:%s', $iport, $host, $port);
+
+      push(@cmds, sprintf('%s -f sleep 3 %s', $cmd, $args));
+
+      $cmd   = sprintf('ssh %slocalhost -p %s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no', ($user||''), $iport);
+      $args  = '';
+
+      $iport ++;
+    }
+  }
+}
+push(@cmds, "$cmd $args");
+
+for my $cmd ( @cmds )
+{
+  #print $cmd;
+  system($cmd);
+}

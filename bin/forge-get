@@ -1,0 +1,91 @@
+#!/bin/bash
+
+cookie_jar="$HOME/.cookie_jar.txt"
+TEMP=$(getopt -an $0 --long help,format: -o f:h -- "$@")
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+eval set -- "$TEMP"
+
+while true
+do
+    case $1 in
+        -f|--format)
+            shift
+            format=$1
+        ;;
+        -h|--help)
+            shift
+            cat <<EOM
+            Usage: $0 [--format <desired_format>] [--help] -- <URL>
+
+            --format - adds the proper Context-type to the request.
+            --help   - this help message
+EOM
+            exit
+        ;;
+        --) shift;break;;
+        *) shift;;
+    esac
+done
+
+req_url=$1
+base_url=$(echo "$req_url" | perl -ne 's#https?://(.*?)/.*#$1/#;print' | tr -d '/')
+login_url="http://$base_url/login/"
+
+[[ -z $req_url ]] && echo  'Uhh, kinda need a valid URL there buddy.' && exit 1
+
+cget()
+{
+  cget_options=$@
+
+  [[ -z "$cget_options" ]] && echo 'cURL options not properly passed from caller.' && exit 10
+
+  if [[ $format ]]
+  then
+    curl -sL -c $cookie_jar -b $cookie_jar -H "Content-type:$format" $cget_options
+  else
+    curl -sL -c $cookie_jar -b $cookie_jar $cget_options
+  fi
+}
+
+get_csrftoken()
+{
+## old method
+  #local url="$1"
+
+  #[[ -z "$url"    ]] && echo 'URL not properly passed from caller.' && exit 11
+  #cget $url GET | grep csrfmiddleware | grep -Po 'value=.*' | awk -F "'" '{print $2}'
+##
+  grep csrftoken $cookie_jar | grep $base_url | awk '{print $7}'
+}
+
+do_login()
+{
+  local url="$1"
+  local token="$2"
+  local options="-H X-CSRFToken:$token $url -d username=admin&password=admin&csrfmiddlewaretoken=$token"
+
+  [[ -z "$url"    ]] && echo 'URL not properly passed from caller.'        && exit 12
+  [[ -z "$token"  ]] && echo 'Token was not properly extracted. Quitting.' && exit 100
+
+  cget $options
+}
+
+canary_bird()
+{
+  local url="$1"
+
+  [[ -z "$url"    ]] && echo 'URL not properly passed from caller.' && exit 13
+  login=$(cget "-vvv -X GET $url" 2>&1 | grep -P '< HTTP/1\.' | grep -Po ' \d+ ' | grep -c 301)
+
+  [[ $login == 1 ]] && return 1
+  return 0
+}
+
+canary_bird $base_url
+
+if [ $? == 1 ]
+then
+  do_login $login_url $(get_csrftoken)
+fi
+
+cget $req_url

@@ -1,0 +1,266 @@
+#!/usr/bin/python2.7
+
+import os, sys, urllib, json, datetime, logging, time, re, calendar, boto
+
+homelib = os.environ['HOME'] + '/lib'
+sys.path.append(homelib)
+
+from pyodinhttp import odin_material_retrieve, OdinOperationError
+
+#from FCSNMPMonitoring import common
+
+debug = False
+aws_material_set = 'com.amazon.access.FC Infra SysEng-sigma-user-1'
+
+class ScannerCountClient(object):
+    def __init__(self,
+                 whid='all',
+                 reportDate=None,
+                 startTime=None,
+                 endTime=None,
+                 debug=False):
+
+        self.debug = debug
+
+        self.whid = whid.lower()
+        
+        self.service='FCSigmaWebsite'
+
+        if reportDate is None:
+            self.reportDateRange = [startTime]            
+            try:
+                currentCounter = calendar.timegm(time.strptime(startTime, '%Y-%m-%d'))
+                endCounter = calendar.timegm(time.strptime(endTime, '%Y-%m-%d'))
+                dayLength = 86400 # seconds in a day
+                currentCounter += dayLength
+                while currentCounter <= endCounter:
+                    self.reportDateRange.append(time.strftime('%Y-%m-%d', time.gmtime(currentCounter)))
+                    currentCounter += dayLength
+            except (ValueError, TypeError), value:
+                # skip any malformed date.
+                logging.error("Error parsing dates: %s" % value)
+        else:
+            #
+            # We've been passed in a date
+            #
+            self.reportDateRange = [reportDate]
+
+        # Now we can parse the timestamp for the unix time......
+
+        self.initBoto()
+
+        #self.SDB_DOMAIN = 'FCHandheldMetricsReports'
+        self.SDB_DOMAIN = 'thinclients'
+
+        self.awsSDBCon = boto.connect_sdb()
+
+        #self.domains = self.awsSDBCon.get_all_domains()
+
+        #for d in self.domains:
+            #print "domain: %s" % d
+
+        self.awsSDBdb = self.awsSDBCon.get_domain(self.SDB_DOMAIN)
+
+        sql = ('select * from thinclients where whid = "%s" '
+               'intersection reboot_reqd is not null '
+               'order by reboot_reqd desc' % whid)
+        query_set = self.awsSDBdb.select(query=sql)
+
+        self.clients = []
+
+        for client in query_set:
+            # Add fields, improve UI wording.
+            client['reboot_reqd_friendly'] = get_thinclient_reboot_reqd(client['reboot_reqd'])
+            client['mac_address'] = client.name
+            self.clients.append(client)
+
+        """
+        for aDate in self.clients:
+            aQuery = "select * from %s where date = '%s'" % (self.SDB_DOMAIN, aDate)
+            if self.whid != 'all':
+                aQuery = "%s and whid = '%s'" % (aQuery, self.whid)
+
+            results = self.awsSDBdb.select(aQuery)
+
+            for count in results:
+                self.rawScanCountData.append(count)
+        """
+
+        return self.clients
+
+    def initBoto(self):
+        """
+        """
+        result = False
+
+        if boto.config.has_section('Credentials'):
+            return True
+
+        #else....
+
+        boto.config.add_section('Credentials')
+        
+        try:
+            key_id = odin_material_retrieve(aws_material_set, 'Principal').rstrip()
+            access_key = odin_material_retrieve(aws_material_set, 'Credential').rstrip()
+            boto.config.set('Credentials', 'aws_access_key_id', key_id)
+            boto.config.set('Credentials', 'aws_secret_access_key', access_key)
+            result = True
+        except OdinOperationError, value:
+            "Could not connect to Odin: %s" % value
+        except Exception, e:
+            "Unknown Error: %s" % e
+            
+        return result
+
+    def report(self):
+        output = []
+
+        scratch = {}
+
+        for aLine in self.rawScanCountData:
+            whid = aLine['whid']
+            aDate = aLine['date']
+            #
+            # 0 pad the hour, if required
+            #
+            anHour = "%02d" % int(aLine['hour'])
+            aLine['hour'] = anHour
+
+            if not scratch.has_key(whid):
+                scratch[whid] = {}
+
+            if not scratch[whid].has_key(aDate):
+                scratch[whid][aDate] = {}
+            
+            scratch[whid][aDate][anHour] = aLine
+
+        fcList = scratch.keys()
+        fcList.sort()
+        for anFC in fcList:
+            dates = scratch[anFC].keys()
+            dates.sort()
+            for aDate in dates:
+                hours = scratch[anFC][aDate].keys()
+                hours.sort()
+                for anHour in hours:
+                    try:
+                        print 'anHour is: ' + str(anHour)
+                        output.append(scratch[whid][aDate][anHour])
+                    except Exception as error:
+                        print 'error: ' + str(error)
+                    
+        return output
+                
+
+    def dump_csv(self):
+        self.csv = ''
+        self.lines = ["Warehouse ID,Date,Hour,Associated,Authenticated"]
+
+        #
+        # Let's group these by FCID, and sort times within the FC
+        #
+
+        FCs = {}
+        for aCount in self.rawScanCountData:
+            if not FCs.has_key(aCount['whid']):
+                FCs[aCount['whid']] = []
+
+            FCs[aCount['whid']].append("%s,%s,%s,%s,%s" % (aCount['whid'],
+                                                           aCount['date'],
+                                                           "%02d" % int(aCount['hour']),
+                                                           aCount['assocCount'],
+                                                           aCount['authCount']))
+        for aKey in FCs.keys():
+            FCs[aKey].sort()
+            self.lines += FCs[aKey]
+        
+        self.csv = "\n".join(self.lines)
+
+        return self.csv
+        
+    def csv_filename(self):
+        if self.whid == None:
+            return("All-FC-Scanner-Counts-%s.csv" % self.startTime)
+        else:
+            return("%s-FC-Scanner-Counts-%s_to_%s.csv" % (self.whid,
+                                                          self.reportDateRange[0],
+                                                          self.reportDateRange[-1]))
+
+    def get_site_thinclients(self,whid):
+        """ 
+        Given a site, retrieve its thinclients as a list of dictionaries
+        TODO: Put this in some sort of shared library;
+        this is replacing a desktop-only tool.
+        """
+        self.initBoto()
+
+        self.SDB_DOMAIN = 'thinclients'
+        self.awsSDBCon  = boto.connect_sdb()
+        self.awsSDBdb   = self.awsSDBCon.get_domain(self.SDB_DOMAIN)
+
+        if whid == 'all':
+            sql = ('select * from thinclients '
+                   'intersection reboot_reqd is not null '
+                   'order by reboot_reqd desc' % whid)
+        else:
+            sql = ('select * from thinclients where whid = "%s" '
+                   'intersection reboot_reqd is not null '
+                   'order by reboot_reqd desc' % whid)
+
+        query_set = self.awsSDBdb.select(query=sql)
+
+        self.clients = []
+        for client in query_set:
+            # Add fields, improve UI wording.
+            client['reboot_reqd_friendly'] = get_thinclient_reboot_reqd(client['reboot_reqd'])
+            client['mac_address'] = client.name
+            self.clients.append(client)
+
+        return self.clients
+
+
+    def get_thinclient_reboot_reqd(self,reboot_reqd):
+        """ Return a human-readable version of reboot required status
+        (Yes/No/Unknown).  """
+        try:
+            if int(reboot_reqd) == 1:
+                reboot_required = 'Yes'
+            else:
+                reboot_required = 'No'
+        except (TypeError, ValueError) as e:
+            # TypeError happens if reboot_reqd = None
+            # ValueError is if reboot_reqd = 'None' etc.
+            reboot_required = 'Unknown'
+
+        return reboot_required
+
+if __name__ == '__main__':
+    import sys
+
+    debug = True
+
+    #ddive = ScannerCountClient(startTime='2014-05-01',
+    #                           endTime='2014-05-30',
+    #                           whid=sys.argv[1],
+    #                           debug=debug)
+    ddive = ScannerCountClient(sys.argv[1])
+
+    # try:
+    #     ddive = ScannerCountClient(startTime=sys.argv[1],
+    #                                endTime=sys.argv[2],
+    #                                debug=debug)
+    # except IndexError:
+    #     ddive = ScannerCountClient(reportDate=sys.argv[1],
+    #                                debug=debug)
+
+    print ddive.dump_csv()
+    print ddive.csv_filename()
+    for aLine in ddive.report():
+        print(aLine)
+
+    
+
+    
+
+

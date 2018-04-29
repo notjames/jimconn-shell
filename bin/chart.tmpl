@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: $PROJ_NAME
+  namespace: common-jenkins
+type: Opaque
+data:
+  username: $USERNAME_m64
+  password: $PASSWD_m64

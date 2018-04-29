@@ -1,0 +1,76 @@
+#!/bin/bash
+
+odd=0
+skipped=0
+primary='HDMI3'
+# relative to primary
+adjacent[0]="HDMI3,left-of"
+docked=$(lsusb | grep -ci dock)
+
+xrandr -q | grep -P ' connected|\s+\d+x'   | \
+       grep -A1 'connected' | grep -v '\-' | \
+
+while read modeline
+do 
+    #echo 'original: ' $modeline
+
+# the monitor type will always be on odd
+# the mode will be on even
+    if [ "$odd" = 0 ]
+    then 
+        let odd++
+        monitor=$(echo $modeline | grep -Po '^[A-Z]+\d'); 
+        #echo 'ODD LINE: monitor: '$monitor
+
+        if [[ "$monitor" =~ "VGA" ]]
+        then
+            #echo 'SKIPPING!'
+            let skipped++
+            continue
+        fi
+    else 
+        let odd--
+        mode=$(echo $modeline | grep -Po '\d+x\d+')
+        #echo 'EVEN LINE: mode: '$mode
+
+        if [ "$skipped" = 1 ]
+        then
+            let skipped--
+            continue
+        fi
+
+        if [ ! -z "$monitor" -a ! -z "$mode" ]
+        then
+            if [[ "$monitor" =~ "$primary" ]]
+            then
+# for some reason it needs to be turned off first.
+                xrandr --output $monitor --off
+
+                sleep 1
+                xrandr --output $monitor --auto -o normal --primary
+            else
+                if [ "$docked" -gt 0 ]
+                then
+                    for side in ${adjacent[@]}
+                    do
+                        this_side=$(echo $side | cut -d , -f 1)
+                        relative=$(echo $side | cut -d , -f 2)
+
+                        if [ "$this_side" = "$monitor" ]
+                        then
+                            xrandr --output $monitor --mode $mode --$relative $primary
+                        fi
+                    done
+                else
+                    xrandr --output $monitor --off
+
+                    sleep 1
+                    xrandr --output $monitor --auto -o normal --primary
+                fi
+            fi
+
+            unset monitor
+            unset mode
+        fi
+    fi 
+done

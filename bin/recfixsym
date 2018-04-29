@@ -1,0 +1,65 @@
+#!/bin/bash
+
+TEMP=$(getopt -an $0 --long relink:,to:,as:,help -o a:r:t:h -- "$@")
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+# Note the quotes around `$TEMP': they are essential!
+eval set -- "$TEMP"
+
+while true
+do
+    case $1 in
+        -a|--as)
+            shift
+            as=$1
+        ;;
+        -r|--relink)
+            shift
+            relink=$1
+        ;;
+        -t|--to)
+            shift
+            to=$1
+        ;;
+        -h|--help)
+            shift
+            cat <<-EOM
+
+Purpose: recursively fix symlinks in the directory tree relative to your PWD, which point 
+         to an invalid file name and replace the erroneous symlinks to point to a correct
+         endpoint. USE-CASE: you change a filename to which 20 symlinks pointed. Provided
+         the symlinks are in the directory tree you're currently in, this tool will fix
+         the symlinks to point to the filename you just changed.
+
+Usage: $0 <--relink to_be_fixed> <--to file_to_link_to> [--as new_symlink_name] --help
+
+** This must run from the directory containing the file to which you are relinking **
+
+--relink <old symlink>     : the symlink in recursively found directories to be changed.
+--to <file_to_link>        : the file to which the new symlink(s) will point.
+--as <filename>            : make the new symlink filename <filename>
+--help - this help message : the file to which you're new symlink will be created.
+
+EOM
+            exit
+        ;;
+        --) break;;
+        *) shift;;
+    esac
+done
+
+[[ -z $relink || -z $to ]] && echo '--relink and --to arguments are required.' && exit 1
+
+realfile=$(realpath $to) && \
+find . -name $relink | \
+while read v
+do
+  path=${v%/*}
+  depth=$(echo "$path" | perl -ne '@r=/\//g;print scalar(@r)')
+
+  cd $path
+  [ -h $relink ] && rm $relink 2>/dev/null
+
+  ln -sf $realfile $as 2>/dev/null
+  cd - >/dev/null 2>&1
+done

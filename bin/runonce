@@ -1,0 +1,4 @@
+#!/bin/bash -x
+#Alternative
+/usr/bin/pgrep -u $USER $(echo $@ | awk '{print $1}') > /dev/null 2>&1 || ($@ &)
+echo $?

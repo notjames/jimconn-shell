@@ -1,0 +1,18 @@
+#!/bin/bash
+
+for dev in /dev/disk/by-id/usb*
+do
+    part=$(echo $dev | grep -Po 'part\d+' | sed 's/part/partition /')
+    actual_device=$(echo ${dev##*/} | \
+                    cut -d : -f 1   | \
+                    perl -ne 's/(.*?)_[a-zA-Z0-9]+-\d$/$1/;s/^usb-//;print')
+    device_link=$(readlink $dev)
+    device=${device_link##*/}
+
+    if [ -z "$part" ]
+    then
+        echo -e "$actual_device -> /dev/$device"
+    else
+        echo -e "$actual_device -> /dev/$device ($part)"
+    fi
+done

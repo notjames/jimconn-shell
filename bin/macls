@@ -1,0 +1,341 @@
+#!/usr/bin/perl -w
+=pod
+
+=head1 Synopsis
+
+ macls [-h|--help] [-d|--debug] -- file|path file|path...n
+
+=cut
+
+=pod
+
+=head1 Description
+
+ It is quite simple.  All you do is supply this
+ script with the directory(ies)/file(s) you want to get
+ info on and voila! there's your info.
+
+ macls /tmp
+  This will give you a listing of all files in /tmp
+
+ macls file1 file2 file3
+  This will give you a listing of files 1 2 and 3.
+
+ macls
+  This will give you a listing of all files in the
+  present working directory.
+
+=cut
+
+# TODO:
+#  Add command line args and options.  One of the
+#  most important of which would be -h (help)
+#
+#  Translate the mode to human readable (Unix)
+#  terms ie (drwxrwxr-x) ==> completed for rev 2.0 (done)
+#
+# $Revision: 437 $
+# $Author: jconner $
+# $Id: macls 437 2006-08-17 16:44:39Z jconner $
+#
+# Version: 1.1
+#
+# Audit Trail:
+#  4/9/2k1  - First conceptualized and started on authoring
+#  4/10/2k1 - Released version 1.0
+#  4/5/2k2  - Released version 2.0
+#
+# ********************************************************
+use strict;
+use File::Basename;
+use Getopt::Long;
+use Pod::Usage;
+
+####################
+
+$|++;
+my $DEBUG      = 0;     # default to no debugging msgs.
+
+####################
+my $plProgName = basename($0);
+my $count      = 0;
+my $total      = 0;
+my $locale     = (localtime time() + 3600 *
+                 (12 - (gmtime)[2]))[2] - 12;
+my @filename;
+####################
+
+parse_cli();
+
+if  ( $#ARGV == -1 )
+{
+    @filename = &readall();
+}
+elsif ( $#ARGV >= 0 )
+{
+    if ( -d $ARGV[0] )
+    {
+        @filename = &readall($ARGV[0]);
+    }
+    else
+    {
+        @filename = @ARGV;
+    }
+}
+
+for my $filename ( @filename )
+{
+
+# reference info:
+#  0 dev      device number of filesystem
+#  1 ino      inode number
+#  2 mode     file mode  (type and permissions)
+#  3 nlink    number of (hard) links to the file
+#  4 uid      numeric user ID of file's owner
+#  5 gid      numeric group ID of file's owner
+#  6 rdev     the device identifier (special files only)
+#  7 size     total size of file, in bytes
+#  8 atime    last access time since the epoch
+#  9 mtime    last modify time since the epoch
+# 10 ctime    inode change time (NOT creation time!) since the epoch  <-- NNNOOOTTT GOOD!! :(
+# 11 blksize  preferred block size for file system I/O
+# 12 blocks   actual number of blocks allocated
+#
+#(The epoch was at 00:00 January 1, 1970 GMT.)
+####
+# from mknod(2) (good info!)
+#        S_ISUID   04000   Set user ID on execution.
+#        S_ISGID   020#0   Set group ID on execution if # is 7, 5, 3, or 1.
+#                          Enable mandatory file/record locking if # is
+#                          6, 4, 2, or 0.
+#        S_ISVTX   01000   Save text image  after execution.
+#        S_IRWXU   00700   Read, write, execute by owner.
+#        S_IRUSR   00400   Read by owner.
+#        S_IWUSR   00200   Write by owner.
+#        S_IXUSR   00100   Execute (search if a directory) by owner.
+#        S_IRWXG   00070   Read, write, execute by group.
+#        S_IRGRP   00040   Read by group.
+#        S_IWGRP   00020   Write by group.
+#        S_IXGRP   00010   Execute by group.
+#        S_IRWXO   00007   Read, write, execute  (search) by others.
+#        S_IROTH   00004   Read by others.
+#        S_IWOTH   00002   Write by others
+#        S_IXOTH   00001   Execute by others.
+#        S_ISVTX           On directories, restricted deletion flag.
+
+    ( $count >= 1 ) ?
+        printf("\n%65s\n",'*' x 55)
+        :
+        print "\n";
+
+    warn "$0: $filename: $!\n" and next if ( ! open (F,$filename) );
+
+    my ($mode,  $uid,
+        $gid,   $size,
+        $atime, $mtime,
+        $ctime, $blksize,
+        $blocks)       = (stat(F))[2,4,5,7 .. 12];
+    my $sym_mode       = &determine_file_type($mode);
+    my $username       = getpwuid($uid);
+    my $grpname        = getgrgid($gid);
+    my @atime_readable = &fixgmt($atime,'atime');
+    my @mtime_readable = &fixgmt($mtime,'mtime');
+    my @ctime_readable = &fixgmt($ctime,'ctime');
+    $mode &= 07777;
+
+    print "MACtime for: \"$filename\"\n";
+    printf("Mode(%s => %04o) %s(%i) %s(%i)\t%i bytes  %i blocks\n",
+                 $sym_mode,
+                       $mode,
+                             ($username || 'Unknown'),
+                                $uid,
+                                    ($grpname || 'Unknown'),
+                                       $gid,
+                                            $size,
+                                                      $blocks,);
+
+    print "Modified time\t........ @mtime_readable\n";
+    print "Access time  \t........ @atime_readable\n";
+    print "Inode Change \t........ @ctime_readable\n";
+
+    close(F);
+
+    $count++;
+    $total = $total + $size;
+}
+
+my $K  = $total / 1024;
+my $M  = ($total / 1024) / 1024;
+
+print "\nTotal files checked : $count\n";
+print "Total size in bytes : $total\n";
+printf("Total size in Kbytes: %iK\n", $K);
+printf("Total size in Mbytes: %iM\n\n", $M) if ( $M > 0.9 );
+
+sub debug
+{
+    my $msg = shift || '';
+
+    if ( $DEBUG )
+    {
+        print 'DEBUG: '.$msg."\n";
+    }
+}
+
+sub parse_cli
+{
+    my ($config, $help, $debug);
+
+    GetOptions(
+                  'h|help+' => \$help,
+                  'd|debug+'=> \$debug,
+              );
+     
+    $DEBUG++ if $debug;
+
+    debug('Debugging turned on');
+
+    if ( $help )
+    {
+        debug('Help requested with -help');
+        pod2usage(-exitval => 100);
+    }
+
+    return;
+}
+
+sub fixgmt
+{
+    my ($object, $type) = @_ ;
+
+    my($aday,$mon,$nday,$gmtime,$year)
+                        = split(/\s+/,gmtime($object));
+    my($hour,$min,$sec) = split(/:/,$gmtime);
+
+    # Do math on gmt time to make it localtime.
+    # Should get this from system LCTIME but I dunno
+    # how to do that yet...sooo
+
+    # Im gonna brute force the math for now.
+    $hour  = abs($hour + $locale );
+    $hour  = "0$hour"  if ( $hour < 10 );
+    $nday  = "0$nday"  if ( $nday  < 10 );
+
+    my $ltime = "$hour:$min:$sec";
+    my $out   = sprintf("\tObject type is: %11s\n\tObject value is: %10s\n\tAlpha day is %14s\n\t".
+                        "Month is %18s\n\tNumber day is %13s\n\tGMTTime is %16s\n\tYear is %19s\n\t".
+                        "Hour is %19s\n\tMinute is %17s\n\tSecond is %17s\n\tLocalTime = %15s",
+                        $type, $object, $aday, $mon, $nday, $gmtime, $year, $hour, $min, $sec, $ltime);
+
+    debug($out);
+
+    return($aday,$mon,$nday,$ltime,$year);
+}
+
+sub readall
+{
+    my $dir = shift();
+
+    if ( $dir )
+    {
+        chdir($dir);
+        opendir(ALL,".") or die("Unable to read: $!\n");
+    }
+    else
+    {
+        opendir(ALL,".") or die("Unable to read: $!\n");
+    }
+
+    my @files = grep(!/(^\.\.*?)/,readdir(ALL))
+                    or die("Unable to get file list: $!\n");
+
+    return(@files);
+}
+
+sub determine_file_type
+{
+    my $mode = shift();
+    my ($type, %owner, %group, %world);
+
+# borrowed from:
+# pwalker@pwccanada.com @ http://php.ca/manual/ru/function.fileperms.php
+
+    # // Unknown
+    $type = '?';
+    # // Unix domain socket
+    (($mode & 0xC000) == 0xC000 ) and $type = 's';
+    # // Directory
+    (($mode & 0x4000) == 0x4000 ) and $type = 'd';
+    # // Symbolic link
+    (($mode & 0xA000) == 0xA000 ) and $type = 'l';
+    # // Regular file
+    (($mode & 0x8000) == 0x8000 ) and $type = '-';
+    # // Block special file
+    (($mode & 0x6000) == 0x6000 ) and $type = 'b';
+    # // Character special file
+    (($mode & 0x2000) == 0x2000 ) and $type = 'c';
+    # // Named pipe
+    (($mode & 0x1000) == 0x1000 ) and $type = 'p';
+
+#/* Determine permissions */
+    $owner{'read'}    = ($mode & 00400) ? 'r' : '-';
+    $owner{'write'}   = ($mode & 00200) ? 'w' : '-';
+    $owner{'execute'} = ($mode & 00100) ? 'x' : '-';
+    $group{'read'}    = ($mode & 00040) ? 'r' : '-';
+    $group{'write'}   = ($mode & 00020) ? 'w' : '-';
+    $group{'execute'} = ($mode & 00010) ? 'x' : '-';
+    $world{'read'}    = ($mode & 00004) ? 'r' : '-';
+    $world{'write'}   = ($mode & 00002) ? 'w' : '-';
+    $world{'execute'} = ($mode & 00001) ? 'x' : '-';
+
+#/* Adjust for SUID, SGID and sticky bit */
+
+    $owner{'execute'} = ($owner{execute} eq 'x') ? 's' : 'S'
+        if ( $mode & 0x800 );
+
+    $group{'execute'} = ($group{execute} eq 'x') ? 's' : 'S'
+        if ( $mode & 0x400 );
+
+    $world{'execute'} = ($world{execute} eq 'x') ? 't' : 'T'
+        if ( $mode & 0x200 );
+
+# done borrowing :)
+
+    $type .= $owner{'read'}.$owner{'write'}.$owner{'execute'}.
+             $group{'read'}.$group{'write'}.$group{'execute'}.
+             $world{'read'}.$world{'write'}.$world{'execute'};
+
+    return($type);
+}
+
+=pod
+
+=head1 Copyright
+
+ Written by Jim Conner (Snafu)
+ <Jim Conner> snafuxnj|@at@|yahoo|.dot.|com
+ Copyright (C) 2001,2017
+ 4/10/2001 (original creation)
+ 1/10/2017 (updated)
+
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License along
+ with this program; if not, write to the Free Software Foundation, Inc.,
+ 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+=head1 Bugs
+
+ None of which I'm aware.
+
+=cut
+
+

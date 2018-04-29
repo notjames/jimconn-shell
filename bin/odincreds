@@ -1,0 +1,26 @@
+#!/bin/sh
+
+MS_NAME=$1
+M_TYPE=$2
+M_SERIAL=$3
+
+if [ -z "$MS_NAME" -o -z "$M_TYPE" ]
+then
+    echo "$0: Retrieve material from Odin"
+    echo "Usage: $0 MATERIAL_SET_NAME MATERIAL_TYPE [MATERIAL_SERIAL]"
+
+    exit 2;
+fi
+
+URL="http://localhost:2009/query?Operation=retrieve&ContentType=JSON&materi
+al.materialName=$MS_NAME&material.materialType=$M_TYPE"
+
+if [ ! -z $M_SERIAL ]
+then
+    URL="$URL&material.materialSerial=$M_SERIAL"
+fi
+
+GET $URL \
+| tr '{},' '\n\n\n' \
+| sed -n 's/"materialData":"\(.*\)"/\1/p' \
+| base64 -di;

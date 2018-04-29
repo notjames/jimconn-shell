@@ -1,0 +1,115 @@
+#!/bin/bash
+# Author: Jim Conner
+#
+# This is not a friendly script. You'll need to know how to fix it up to use
+# for your thing. If you need to keep your iteration of the script, please do
+# so as a different name and do NOT tweak this copy.
+#
+# How to use:
+# 1. You must a template JSON file with the correct new objects in it saved off
+#    some place like /var/tmp/FILENAME.json
+# 2. tweak the code below to do what you need to do. :) Simple, right? Follow
+#    the breadcrumbs in the comments.
+# Please note that this copy of this script does not write the new roles back
+# to production. To do that, one must remove the comment on/around line 77.
+# This script DOES create a copy of the original roles in /var/tmp as well as
+# a copy of the new roles.
+
+# season to taste
+base=/var/tmp/hdd-burnin
+model=/var/tmp/hdd-burnin.json-20160713
+
+# upload new roles to chef?
+upload_new=0
+
+# Leave alone
+orig=$base-orig
+new=$base-new
+
+if ! mkdir -p $orig
+then
+  echo >&2 'Unable to mkdir '$orig
+  exit 2
+else
+  if ! mkdir -p $new
+  then
+    echo >&2 'Unable to mkdir '$new
+    exit 4
+  fi
+fi
+
+for role in $(knife role list)
+do
+  echo 'Working on '$role
+
+  [[ ! -s $orig/$role.json ]] && \
+    knife role show -F json $role > $orig/$role.json
+
+  ruby -e '
+    require "json"
+    require "pp"
+
+    inject         = JSON.parse(File.read(ARGV[1]))
+    inject_hdd     = inject["override_attributes"]["mcap"]["hdd"]
+    inject_runlist = inject["run_list"][2..4]
+
+    role           = JSON.parse(File.read(ARGV[0]).chomp)
+
+    begin
+      role["override_attributes"]["mcap"]["hdd"] = inject_hdd
+    rescue
+      $stderr.puts "  This role does not appear to an mcap object. Skipping."
+      puts "%s" % [JSON.generate(role)]
+      exit 1
+    end
+
+    role["env_run_lists"]
+      .keys
+      .each \
+      {|cust|
+        rl_inject_pt   = nil
+
+        $stderr.puts "  Environment for: %s" % [cust]
+
+        role["env_run_lists"][cust]
+          .each_with_index \
+          {|recipe,idx|
+            #$stderr.puts "  On recipe: %s at index %s" % [recipe,idx]
+
+            if recipe =~ /dell_tools|load_sm_tools/
+              $stderr.puts "     -- found tools loading at index %s" % [idx]
+              rl_inject_pt = idx + 1
+            end
+          }
+
+        unless rl_inject_pt.nil?
+          inject_runlist
+            .each \
+            {|item|
+              role["env_run_lists"][cust].insert(rl_inject_pt, item)
+              rl_inject_pt = rl_inject_pt + 1
+            }
+        else
+          $stderr.puts "Not able to find a place to insert into runlist for %s:%s" % [ARGV[0],cust]
+        end
+      }
+
+    puts "%s" % [JSON.generate(role)]
+  ' $orig/$role.json $model > $new/$role-hdd-burnin.json
+done
+
+if  [[ $upload_new == 1 ]]
+then
+  for new_role in $new/*json
+  do
+    if [[ -s $new_role ]]
+    then
+      echo >&2 'Loading '$new_role
+      knife role from file $new_role
+    else
+      echo >&2 'Skipping upload of new role because file is empty: '$new_role
+    fi
+  done
+else
+  echo >&2 'Skipping because upload is not desired.'
+fi

@@ -1,0 +1,3 @@
+#!/usr/bin/lua
+
+os.print("This is a test")

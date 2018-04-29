@@ -1,0 +1,1 @@
+< $1 /usr/bin/env ruby -ne 'puts $_.chomp.reverse unless $_.nil?'

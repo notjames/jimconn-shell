@@ -1,0 +1,234 @@
+#!/bin/bash 
+
+## TODO!
+## Change from sudo mount to udisks 
+## udisks --mount /dev/sdc1 --mount-fstype vfat
+## udisks --mount $(find_usbdev | grep My | grep part | awk -F ' -> ' '{print $2}')
+
+# srchost:srcpath^dstpath
+#path2bkup[0]="jimconn-1.desktop:/workplace2/work^jimconn-1.desktop/"
+#path2bkup[1]="jimconn-1.desktop:/etc^jimconn-1.desktop/"
+path2bkup[0]="$HOME^redapt/jimconn-redapt/"
+path2bkup[1]="/etc^redapt/jimconn-redapt/"
+path2bkup[2]="/var/tmp^redapt/jimconn-redapt/"
+path2bkup[3]="/opt^redapt/jimconn-redapt/"
+
+nicelevel=19
+logpath='/var/tmp'
+bkuplog='bkup.log'
+device='/dev/sdb1'
+loopcount=0
+remote=0
+
+TEMP=$(getopt -an $0 --long nice:help,force,remote,device: -o hfrd:n: -- "$@")
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+function get_dev_name()
+{
+    finddev=$HOME/bin/find_usbdev
+    if [ -x "$finddev" ]
+    then
+    	# a bit custom to my needs (grep My)
+        $finddev | grep Seagate | grep dev | awk -F ' -> ' '{print $2}' | cut -d ' ' -f 1
+    fi
+}
+
+function is_mounted()
+{
+    udisks --show-info $device | grep 'is mounted' | cut -d : -f 2 | grep -Po '\d'
+}
+
+function is_valid_dev()
+{
+    #echo 'Checking: '$device >&2
+    udisks --show-info $device > /dev/null 2>&1;echo $?
+}
+
+function mount_dev()
+{
+# Mounted /org/freedesktop/UDisks/devices/sdc1 at /media/backup
+    udisks --mount $device > /dev/null 2>&1;echo $?
+}
+
+# Note the quotes around `$TEMP': they are essential!
+eval set -- "$TEMP"
+
+if [ $# = 1 ]
+then
+    device=$(get_dev_name)
+    echo 'Will try and use device: '$device
+    echo
+    echo 'You will be backing up local paths.'
+    echo 'Press any key to continue or ctrl+c to quit.'
+    echo
+    read a
+else
+    while true
+    do
+        case $1 in
+            -d|--device) 
+                shift
+                device=$1
+            ;;
+            -r|--remote) 
+                shift
+                remote=1
+            ;;
+            -f|--force)
+                shift
+                force=1
+            ;;
+            -n|--nice)
+                shift
+                nicelevel=$1
+                echo 'Nice level set to '$nicelevel
+            ;;
+            -a|--add)
+                shift
+                next=$((${path2bkup[#]} + 1))
+                path2bkup[$next]=$1
+            ;;
+            -h|--help)
+                shift
+                cat <<EOM
+                Usage: $0 [--device </dev/foo>] [--remote] --help
+
+                * defaults to /dev/sdb1 for the back up device
+                --remote is used to backup jimconn-1.desktop
+                --help - this help message
+EOM
+                exit
+            ;;
+            --) break;;
+            *) shift;;
+        esac
+    done
+fi
+
+# if the device on the command line used was absolute path
+# then grab the relative device name.
+#device=${device##*/}
+
+if [ ! -z "$remote" -a "$remote" = 1 ]
+then
+    #path2bkup[4]="jimconn-ubuntu.aka.amazon.com:/etc^ubuntu-desktop/"
+ # assuming that $HOME on src and dst host is the same.
+    #path2bkup[5]="jimconn-ubuntu.aka.amazon.com:/home/likewise-open/ANT/jimconn^ubuntu-desktop/"
+    #path2bkup[6]="jimconn-ubuntu.aka.amazon.com:/etc^ubuntu-desktop/"
+    :
+fi
+
+# Verify that the device is mounted...
+while [ "$loopcount" -le 2 ]
+do
+    if [ "$(is_valid_dev)" -gt 0 ]
+    then
+        echo 'The device specified does not appear valid.'
+        echo 'Attempting to get the right device...'
+        echo 'Ctrl+c and re-run using --device <device> --force to override'
+
+        device=$(get_dev_name)
+        let loopcount++
+    else
+        echo 'OK. Device to use is: '$device
+        break
+    fi
+done
+
+if [ "$(is_mounted)" = 1 ]
+then
+# it's mounted, let's make sure it's the right kind of device by checking
+# the space available on the device -- assuming its +1T
+    if [ $(df -h | grep $device | grep -Pc '\d+\.\d+T') = 0 ]
+    then
+        if [ -z $force ]
+        then
+            echo 'Seems that this device '$device' is not valid. Please re-run with '
+            echo '--force to use this device.'
+            exit 2
+        fi
+    else
+        echo
+        echo 'Mounting drive...'
+
+        if [ "$(mount_dev)" -gt 0 ]
+        then
+            echo 'Hmm. Could not mount the medium. Is it attached? Quitting.'
+            exit 1
+        fi
+    fi
+else
+    echo
+    echo 'Mounting drive...'
+
+    if [ "$(mount_dev)" -gt 0 ]
+    then
+        echo 'Hmm. Could not mount the medium. Is it attached? Quitting.'
+        exit 2
+    else
+        if [ "$(is_mounted)" -gt 0 ]
+        then
+            echo 'Ok. Backup medium is mounted. Rsyncing now...'
+        else
+            echo 'Unable to mount medium! Problem detected. Quitting'
+            echo 'Try running: udisks --mount '$device
+            echo 'to possibly determine what problem exists.'
+            exit 10
+        fi
+    fi
+fi
+
+basedst="$(udisks --show-info $device | grep 'mount paths' | grep -Po '/.*')/"
+echo 'Please provide admin password...'
+sudo -k && sudo ls > /dev/null
+
+if [ ! -z "$basedst" ]
+then
+    for src in "${path2bkup[@]}"
+    do
+        #bkupcmd="nice -n$nicelevel /usr/bin/rsync -crpvh "
+        # don't use -v when rsyncing to exFAT as exFAT doesn't cope
+        # well with preserving permissions:
+        # http://blog.marcelotmelo.com/linux/ubuntu/rsync-to-an-exfat-partition/
+        #bkupcmd="nice -n$nicelevel /usr/bin/rsync -hrltDvaP --exclude-from=/var/tmp/ignorelist "
+        bkupcmd="nice -n$nicelevel /usr/bin/ionice -c2 -n7 /usr/bin/rsync -Prltvc --exclude-from=/var/tmp/ignorelist "
+
+# srchost:srcpath^dstpath
+# local copies will not have ':' in path string
+        if [ $(echo "$src" | grep -c '^') -gt 0 ]
+        then
+            if [ $(echo "$src" | grep -c ':') -gt 0 ]
+            then
+                if [ $remote = 1 ]
+                then
+                    #bkupcmd="nice -n$nicelevel /usr/bin/rsync -crpvzh -e ssh "
+                    bkupcmd="nice -n$nicelevel /usr/bin/ionice -c2 -n7 /usr/bin/rsync -Prltvc -e ssh "
+                else
+                    continue
+                fi
+            fi
+
+            dst="${basedst}$(echo $src | cut -d '^' -f 2)"
+            src="$(echo $src | cut -d '^' -f 1)"
+        fi
+
+        logprefix=$(echo $src | cut -d '^' -f 1 | sed 's/^\///' | tr '/:' '-' | sed 's/--/-/g')
+        uid=$(/usr/bin/stat $src | grep -i uid | awk -F : '{print $3}' | tr -d ' ' | grep -Po '\d+')
+        owner=$(grep -P :$uid /etc/passwd | awk -F ':' '{print $1}')
+        exec_uid="$USER"
+
+        echo 'Backup of "'$src'" to "'$dst'"'
+        echo 'Checking ownership of: ' $src
+        echo "owner: $owner and executing uid: $exec_uid"
+
+        if [ "$owner" != "$exec_uid" ] 
+        then
+            echo '  -- The source directory: "'$src'" is not owned by: "'$exec_uid'". Sudo will be used.'
+            bkupcmd="sudo -u $owner $bkupcmd"
+        fi
+
+        echo "executing command: $bkupcmd $src $dst"
+        ($bkupcmd "$src" "$dst" > $logpath/$logprefix-$bkuplog 2>&1 &)
+        echo
+    done
+fi

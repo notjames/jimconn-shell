@@ -1,0 +1,1321 @@
+#!/apollo/bin/env perl/bin/perl5.8/perl
+
+# testing RCS keywords
+
+##############################################################################
+#
+#       Copyright (c) 2003-2006 Amazon.com Inc. All Rights Reserved.
+#       AMAZON.COM CONFIDENTIAL
+#
+# $Id: //brazil/src/appgroup/envImprovement/utils/RemoteCommand/mainline/bin/remote-command#17 $
+# $DateTime: 2012/05/17 13:51:56 $ $Author: jmason $
+#
+# Original source: /src/cvs/src/erp-support/perl-scripts/remote-command,v
+# Original version: 1.8
+#
+##############################################################################
+
+# This script is designed to run one arbitrary command on an arbitrary number of hosts.
+# The obvious use is to run a command across a fleet.   This script has been well-documented
+# on the Amazon wiki, however the new changes include the following you may want (or not).
+#
+#  * the interactive mode is now done through stdin/stderr (much like rm -i, e.g.)
+#  * the results of the program are written to stdout in a simple xml format, for easy parsing by other programs
+#  * the --batch switch runs all commands concurrently, for instance to collect data from many machines
+#  * (--batch=3 will run with concurrency of 3)
+#  * an attempt has been made to keep concurrency compatible with all other features
+#  * unlike the last version, there are no dependencies on Amazon code, especially group specific (i.e. ERP)
+#  * (however, it still understands the Amazon LDAP structure to retreive a hostclass)
+
+use strict;
+use warnings;
+use Data::Dumper;
+use Expect;
+use File::Basename qw(basename dirname);
+use File::Path qw(mkpath);
+use File::Temp qw(tempdir);
+use Getopt::Long;
+use LWP::Simple;
+use Net::LDAP::LDIF;
+use Net::LDAP::Search;
+use Net::LDAP::Util;
+use Net::LDAP; # LDAP for finding hosts in a hostclass
+use POSIX qw(strftime); # format log times
+use Term::ReadKey;
+use URI::Escape;
+use XML::Simple;
+
+# Uncomment to turn on Expect debugging
+#
+# $Expect::Debug=3;
+# $Expect::Exp_Internal=1;
+
+umask 0000;
+
+# set autoflush on
+$| = 1;
+
+my %options;
+my @hosts;
+my @exclude_hosts;
+my @restrict_hosts;
+my @classes;
+my @environments;
+
+my $ldap = undef; # INVARIANT: iff $ldap is defined, then there is an existing bound connection to the LDAP server
+
+$options{batch}=1;
+# note: %Z always returns the current timezone.  so use with localtime, not gmtime.
+$options{time_format} = "%Y%m%d %T %Z";
+
+if(open(RC, "<", $ENV{'HOME'} . "/.remote-commandrc")) {
+    my @rc_args;
+    while(my $line = <RC>) {
+        chomp $line;
+        if($line =~ /^\s*(#|$)/) {
+            next;
+        }
+        push @rc_args, $line;
+    }
+    close(RC);
+    unshift @ARGV, @rc_args;
+}
+
+
+GetOptions(
+    "help"                 => \$options{help},
+    "no-password"          => \$options{no_password},
+    "force"                => \$options{force},
+    "server=s"             => \@hosts,
+    "recurse:i"            => \$options{recurse},
+    "exclude-servers=s"    => \@exclude_hosts,
+    "restrict-servers=s"   => \@restrict_hosts,
+    "class=s"              => \@classes,
+    "environment=s"        => \@environments,
+    "delay:i"              => \$options{delay},
+    "batch:i"              => \$options{batch},
+    "kill=i"               => \$options{timeout},
+    "parameters:s"         => \$options{parameters},
+    "test"                 => \$options{test},
+    "verbose"              => \$options{verbose},
+    "manual"               => \$options{manual},
+    "text-output"          => \$options{text_output},
+    "override-ssh=s"       => \$options{override_ssh},
+    "override-ssh-arg=s\@" => \$options{override_ssh_args},
+    "override-prompt=s"    => \$options{override_prompt},
+    "override-ping=s"      => \$options{override_ping},
+    "audit-log=s"          => \$options{audit_log},
+    "time-format=s"        => \$options{time_format},
+    "die-on=s"             => \$options{die_on},
+);
+    
+# because this 'could' take a value, but isn't required, we need to give it
+# a value if the option is used but has no value.
+$options{parameters} = 1 if defined $options{parameters} && ! $options{parameters};
+$options{delay} = 0      if defined $options{delay} && ! $options{delay};
+$options{batch} = 1      if ! defined $options{batch}; # no concurrency
+$options{batch} = 0      if defined $options{batch} && ! $options{batch}; # unlimited concurrency
+$options{recurse} = 10   if (defined $options{recurse} && $options{recurse} <= 0);
+
+my @SSH_DEFAULT = qw(/usr/bin/ssh -2 -q -o StrictHostKeyChecking=no -t);
+if ($options{override_ssh} && $options{override_ssh_args}) {
+    die "--override_ssh and --override_ssh_args are mutually exclusive!";
+}
+
+my @SSH = @SSH_DEFAULT; 
+if ($options{override_ssh}) {
+    # Yuck -- should instead get a real shell to parse this for me
+    @SSH = split(/\s+/, $options{override_ssh});
+} elsif ($options{override_ssh_args}) {
+    @SSH = @{$options{override_ssh_args}};
+}
+
+my $PING = $options{override_ping} || "/bin/ping";
+
+my $COMMAND = $ARGV[0];
+
+usage_and_die() if( $options{help} );
+
+my $ping_found = 1;
+if(ping('localhost')==-1) {
+   print STDERR message("PING: $PING not available. continuing.");
+   $ping_found = 0;
+} 
+
+#
+# options validation
+#
+
+if( ! (( scalar(@hosts) || scalar(@classes) || scalar(@environments)) xor $options{parameters} ) ) {
+    die("Must use --server <server> or --class <host class>, OR --parameters flag");
+}   
+
+if((scalar(@restrict_hosts) or scalar(@exclude_hosts)) && $options{parameters}) {
+    die("Cannot use --restrict-servers or --exclude-servers with --parameters");
+}
+
+if( ! defined($COMMAND) ) {
+    die("Missing command!");
+} 
+
+verbose("Using TEST mode.") if $options{test};
+
+#
+# generate the commands
+#
+# use 2 arrays instead of a hash to
+# allow duplicate hosts or commands
+#
+my @commands;
+my @command_hosts;
+if($options{parameters}) {
+
+    # open the input file
+    my $fh;
+    if(-r $options{parameters}) {
+        open(FILE, "<$options{parameters}") or
+            die("Couldn't open \"$options{parameters}\" for reading: $!");
+        $fh = \*FILE;
+    } else {
+        $fh = \*STDIN;
+    }
+
+    # generate the commands for the hosts
+    while(<$fh>) {
+        chomp($_);
+        # note: the -1 [third parameter to split] says to not discard
+        # empty fields -- i.e. if the line is "a\t", then split with
+        # -1 will return an array of two elements with an empty string
+        # for the second element.  Without the -1, it will merely return
+        # an array with one element -- "a".
+        #
+        # Next, if @row is empty, then split won't return the right number
+        # of values -- it will return zero instead of one.  So we fix that
+        # by entering an empty string.
+        my @row = split(/\t/,$_,-1);
+        @row = ("") if not scalar(@row);
+
+        # host is always the first column of input unless --manual
+        my $host = shift @row if ! $options{manual}; 
+
+        my $temp_command = $COMMAND;
+        my @matches = $temp_command =~ /\?/g;
+        die("Number of parameters in command don't match number of input parameters!")
+            if scalar(@matches) != scalar(@row);
+
+        foreach my $param (@row) {
+            $temp_command =~ s/\?/$param/;
+        }
+
+        push @commands, make_args_array_for_command($temp_command, $host);
+        push @command_hosts, $host if $host;
+    }
+} else {
+    # this will be the final list of servers
+    # to work from
+    my @good_hosts;
+
+    my $hostclass_lookups = 0;
+
+    # add hosts expanded from --class
+    foreach my $class (@classes) {
+       my @new_hosts;
+       if (defined $options{recurse}) {
+           @new_hosts = get_hosts_for_hostclass_recursively($class, \$hostclass_lookups);
+       } else {
+           @new_hosts = get_hosts_for_hostclass($class);
+       }
+
+       # Exit if we can't get the hosts for this hostclass -- we don't
+       # want to quietly skip any hosts in our command list because
+       # the user may be doing something critical.
+       #
+       # Note, however, that this is a very conservative failsafe; the
+       # LDAP lookups *should* abort the program if there are any
+       # actual errors looking up a legitimate hostclass.
+
+       die("Failed to get hosts for hostclass: \"$class\"") if scalar(@new_hosts) == 0;
+
+       push @good_hosts, @new_hosts;
+    }
+
+    # once we're done with LDAP, we can release our connection;
+    # as per the INVARIANT, we must also undefine our handle
+    if (defined $ldap) {
+        $ldap->unbind;
+        $ldap = undef;
+    }
+
+    # add hosts expanded from --environment
+    foreach my $environment (@environments) {
+        my @new_hosts = get_hosts_for_environment($environment);
+
+        # exit if we can't get the hosts for environment - we don't want to quietly
+        # skip any hosts in our command list.
+        die("Failed to get hosts for environment: \"$environment\"") if scalar(@new_hosts) == 0;
+
+        push @good_hosts, @new_hosts;
+    }
+
+    # remove duplicate hosts, this is also the list of 'all' hosts
+    # not counting those added by --server
+    my %all_hosts;
+    map{ $all_hosts{$_}++ } @good_hosts;
+
+    @good_hosts = keys %all_hosts;
+
+    # generate list of hosts matching the restrict patterns
+    if(scalar(@restrict_hosts)) {
+        my %r_hosts;
+        foreach my $r_host (@restrict_hosts) {
+            my @matched_r_hosts = grep(/$r_host/, @good_hosts);
+            map{ $r_hosts{$_}++ } @matched_r_hosts;
+        }
+    
+        # use the updated list of matching restrict hosts
+        @good_hosts = keys %r_hosts;
+    }
+
+    # generate list of hosts matching the exclude patterns
+    if(scalar(@exclude_hosts)) {
+        my %e_hosts;
+        foreach my $e_host (@exclude_hosts) {
+            my @matched_e_hosts = grep(/$e_host/, @good_hosts);
+            map{ $e_hosts{$_}++ } @matched_e_hosts;
+        }
+    
+        # remove the exclude hosts from the list of hosts
+        my @temp_hosts;
+        map{ push @temp_hosts, $_ unless $e_hosts{$_} } @good_hosts;
+        @good_hosts = @temp_hosts;
+    }
+
+    # make a lookup table of the good hosts
+    my %g_hosts;
+    map{ $g_hosts{$_}++ } @good_hosts;
+
+    # update the exclude hosts with the real host names
+    # this includes those hosts excluded by the restrict hosts list
+    @exclude_hosts = ();
+    map{ push @exclude_hosts, $_ unless $g_hosts{$_} } keys %all_hosts;
+
+    # add hosts from --server
+    @good_hosts = sort @good_hosts;
+    push @good_hosts, @hosts;
+
+    # generate the commands for the hosts
+    foreach my $host (@good_hosts) {
+        my $temp_command = $COMMAND;
+        $temp_command =~ s/SERVER/$host/g;
+
+        push @commands, make_args_array_for_command($temp_command, $host);
+        push @command_hosts, $host;
+    }
+}
+
+#
+# we have to re-open STDIN b/c the previous read for
+# --parameters could have closed STDIN after 
+# consuming the input data. (when using an input pipe)
+#
+# this is needed to get the user confirmation and password.
+# obviously if the user doesn't need to enter confirmation
+# or password, then we don't need to check this
+#
+if (!($options{no_password} && $options{force}) && tell(STDIN) == -1) {
+  open(STDIN, "</dev/tty") or
+    die("Couldn't open /dev/tty for reading: $!");
+}
+
+# confirm the actions
+# print this "out of band" in the stderr channel
+
+if( ! $options{force} ) {
+    print STDERR "\n";
+    print STDERR "Excluded Hosts: " . join("\n                ",sort @exclude_hosts) . "\n" if scalar @exclude_hosts;
+    print STDERR "Included Hosts: " . join("\n                ",@command_hosts) . "\n" if scalar @command_hosts;
+    print STDERR "     Commands : " . join("\n                ",map { format_array_ref($_) } @commands) . "\n";
+    print STDERR "        Delay : $options{delay} seconds\n" if $options{delay};
+    print STDERR "        Delay : User Confirmation\n" if defined $options{delay} && $options{delay} == 0;
+    print STDERR "  Concurrency : $options{batch}\n" if $options{batch} > 1;
+    print STDERR "  Concurrency : Unlimited\n" if defined $options{batch} && $options{batch} == 0;
+    print STDERR "    Kill Time : $options{timeout} seconds\n" if $options{timeout};
+    print STDERR " Die on regex : $options{die_on} \n" if $options{die_on};
+    print STDERR "\n";
+
+    if (confirm("Is this correct [no]? ", 'no') ne 'yes' ) {
+        print STDERR "Exiting...\n";
+        exit 0;
+    }
+} else {
+    verbose("--force used, skipping command confirmation.");
+}
+
+# get the user's password
+# print this "out of band" in the stderr channel
+
+my $password;
+if(! $options{test} && ! $options{no_password}) {
+    ReadMode 'noecho';
+
+    print STDERR "Password: ";
+
+    $password = <STDIN>;
+    chomp($password);
+
+    ReadMode 'normal';
+    print STDERR "\n";
+} else {
+    verbose("--no-password used, skipping password entry");
+}
+
+my $audit_fh;
+if($options{audit_log}) {
+    my $audit_log = strftime($options{audit_log}, localtime(time()));
+    mkpath(dirname($audit_log));
+    open($audit_fh, ">>", $audit_log) or die "Failed to open audit log " . $audit_log . " for writing!";
+}
+
+# launch the commands concurrently
+# (if concurrency isn't desired then launch with a batch size of 1.)
+
+# this program forks a child per command to run.  then it collect the output of each
+# into one std out.  we need to know which line of output is from each child.
+# our method is to keep the lines of each child together with a header and footer around them.
+# To avoid race conditions, only the main program writes to std out.  The
+# children each get a temp file (all stored in a shared, unique, temp directory).  The main
+# program reads these files (once the child is finished) and spits them to std out,
+# thereby keeping all the lines of each child together.
+my $syncdir = tempdir('rmtcmd-XXXX', TMPDIR => 1 );
+
+verbose("syncing $options{batch} processes with files in '$syncdir'");
+
+# the coming loop will be easier if we redefine an "unlimited" batch.
+# instead of 0, we will use the total number of commands to be run
+# we didn't have this total number up front
+$options{batch} = scalar(@commands) if ( $options{batch} == 0 );
+
+my %command_result;
+my $pid_count;
+my %child_pids;
+my @start_times;
+my $i = 0; # command index
+my $premature_death = 0;
+    
+do_log("<?xml version='1.0'?>\n") unless ($options{text_output});
+do_log("<results>\n") unless ($options{text_output});
+
+do_log("<user>" . userid() . "</user>\n") unless ($options{text_output});
+
+COMMANDS: while( $i < scalar(@commands) ) {
+    my $batch = 0;
+    while( ($batch < $options{batch}) && ($i < scalar(@commands)) ) {
+
+        my $host = $command_hosts[$i] if defined $command_hosts[$i];
+        my $command = $commands[$i];
+
+        print STDERR "Host: $host\n" if ( $host && ! $options{text_output} );
+        verbose("Command: " . format_array_ref($command));
+
+        if( $host && defined $command_hosts[$i+1] ) {
+            verbose("Next server will be: $command_hosts[$i+1]");
+        } elsif( $host ) {
+            verbose("This is the last server.");
+        }
+
+        if( defined $commands[$i+1] ) {
+            verbose("Next command will be: " . format_array_ref($commands[$i+1]));
+        } else {
+            verbose("This is the last command.");
+        }
+
+        # check host validity & availability
+        if (defined($host) && $ping_found) {
+            my $ping_result = ping($host);
+
+            if ($ping_result == 1) {
+                print STDERR message("Unreachable host: $host");
+                next;
+            } elsif ($ping_result == 2) {
+                print STDERR message("Invalid host: $host");
+                next;
+            }
+        }
+
+        if( defined $options{delay} && $options{delay} == 0 ) {
+            next if confirm("Skip [no]? ", 'no') eq 'yes';
+        }
+        my $pid = fork;
+        if ($pid == 0) {
+            # changes affect child only
+            # write output of do_command() to files
+            open(STDOUT, ">$syncdir/$i.out") or die("Couldn't open $syncdir/$i.out for writing stdout: $!");
+            open(STDERR, ">$syncdir/$i.err") or die("Couldn't open $syncdir/$i.err for writing stderr: $!");
+            do_command($i) if $pid == 0; # will exit before returning
+        }
+        $start_times[$i] = time();
+        $child_pids{$pid} = $i;
+
+        $batch++;
+    } continue {
+        $i++;
+    }
+
+    # wait for this batch of children.
+    # there may be less than "batch" children if we ran out of commands to run.
+    my @host_statuses = ();
+    while( scalar(keys %child_pids) > 0 ) {
+        my $pid = wait;
+        push(@host_statuses, report_child($child_pids{$pid}));
+        delete $child_pids{$pid};
+    }
+
+    foreach my $r (@host_statuses) {
+        my %response = %{$r};
+        if ($response{signal_death}) {
+            $premature_death = 1;
+            last COMMANDS;
+        }
+    }
+
+    if( $options{delay} && ($i < scalar(@commands)) ) {
+        verbose("Sleeping for $options{delay} seconds before continuing.");
+        sleep($options{delay});
+    }
+}
+if ($premature_death) {
+    if ($options{text_output}) {
+        do_log("Commands caused premature death");
+    }
+    else {
+        do_log("<premature_death/>\n");
+    }
+}
+do_log("</results>\n") unless ($options{text_output});
+
+if($audit_fh) {
+    close($audit_fh);
+}
+
+# release our temp dir used for synchronizing output
+# if the program is interrupt and doesn't make it this far,
+# we'll assume leaving the directory is OK (and maybe good).
+rmdir($syncdir);
+
+exit 0;
+
+############################################
+
+sub make_args_array_for_command {
+    my ($temp_command, $host) = @_;
+    if ($options{manual}) {
+        return [ $temp_command ];
+    }
+
+    return [ @SSH, $host, $temp_command ];
+}
+
+############################################
+
+sub format_array_ref
+{
+    local $Data::Dumper::Indent = 0;
+    local $Data::Dumper::Terse = 1;
+    return Dumper($_[0]);
+}
+
+############################################
+
+sub xml_escape
+{
+    $_ = $_[0];
+
+    s/&/&amp;/g;
+    s/"/&quot;/g;
+    s/'/&apos;/g;
+    s/</&lt;/g;
+    s/>/&gt;/g;
+
+    return $_;
+}
+
+############################################
+
+sub report_child
+{
+    my ($i) = @_;
+
+    # before a purist jumped down my throat, this is just a *light* xml to organize the output
+
+    my %response = ();
+    $response{hostname} = $command_hosts[$i] if defined $command_hosts[$i];
+    $response{signal_death} = 0;
+    
+    if ( ! $options{text_output} ) {
+        do_log(message("<command>")); # acts as beginning of record
+        do_log(message("<id>$i</id>")); # acts as beginning of record
+        do_log(message("<host>$command_hosts[$i]</host>")) if defined $command_hosts[$i];
+        do_log(message("<script>" . xml_escape(format_array_ref($commands[$i])) . "</script>"));
+
+        do_log(message("<starttime>" . xml_escape(strftime($options{time_format}, localtime($start_times[$i]))) . "</starttime>"));
+        do_log(message("<endtime>" . xml_escape(strftime($options{time_format}, localtime(time()))) . "</endtime>"));
+    }
+
+    my $logger = sub { do_log(xml_escape(shift)) };
+    if ( $options{text_output} ) {
+        $logger = sub { do_log($_) };
+    }
+
+    my $die_regex = $options{die_on};
+    if (! open(CHILD, "<$syncdir/$i.out")) {
+        my $msg = "could not retrieve stdout from command $i ($syncdir/$i.out). continuing.";
+        print STDERR message($msg);
+        if ( $options{text_output} ) {
+            do_log(message("<stdout_failed>" . xml_escape($msg) . "</stdout_failed>"));
+        }
+        else {
+            do_log($msg);
+        }
+    } else {
+        do_log(message("<stdout>")) unless ( $options{text_output} );
+        while (<CHILD>) {
+            $logger->($_);
+            $response{signal_death} = 1 if ($die_regex && $_ =~ /$die_regex/);
+        }
+        close CHILD;
+        unlink "$syncdir/$i.out";
+        do_log(message("</stdout>")) unless ( $options{text_output} );
+    }
+
+    if (! open(CHILD, "<$syncdir/$i.err")) {
+        my $msg = "could not retrieve stderr from command $i ($syncdir/$i.err). continuing.";
+        print STDERR message($msg);
+        do_log(message("<stderr_failed>" . xml_escape($msg) . "</stderr_failed>"));
+    } else {
+        do_log(message("<stderr>")) unless ( $options{text_output} );
+        while (<CHILD>) {
+            $logger->($_);
+            $response{signal_death} = 1 if ($die_regex && $_ =~ /$die_regex/);
+        }
+        close CHILD;
+        unlink "$syncdir/$i.err";
+        do_log(message("</stderr>")) unless ( $options{text_output} );
+    }
+
+    if ( ! $options{text_output} ) {
+        do_log(message("<signal_death>" . xml_escape($response{signal_death}) . "</signal_death>"));
+    }
+    else {
+        do_log("$response{hostname} signaled this to die\n") if $response{signal_death};
+    }
+
+    do_log(message("</command>")) unless ( $options{text_output} ); # acts as end of record
+    return \%response;
+}
+
+############################################
+
+sub do_command
+{
+    my ($i) = @_;
+
+    # this subroutine is a single (probably ssh based) command run as a child process.
+    # it should exit when it is complete
+    # it should write to stdout and stderr as usual and the parent will handle it
+
+    my $status = 0;
+
+    my $command = $commands[$i];
+
+    eval {
+        my $expect;
+
+        # user requested exiting the application with Ctrl-C (control+c)
+        local $SIG{INT} = sub {
+            alarm 0; # unset the alarm so it won't bother us
+            verbose("Signal INT requested. Killing current command, then exiting...");
+            kill_pid($expect->pid()) if defined $expect && $expect->pid();
+
+            # WARNING the 'exit' in this string is used later to check 
+            # whether to exit the app.  if you change this, be sure 
+            # to updated the exit check inside the if($@) block after
+            # the eval.
+            die("Application killed by user, exiting...\n");
+        };
+
+        # user requested skipping the current command with Ctrl-\ (control+backslash)
+        local $SIG{QUIT} = sub {
+            alarm 0; # unset the alarm so it won't bother us
+            verbose("Signal QUIT received. Killing current command...");
+            kill_pid($expect->pid()) if defined $expect && $expect->pid();
+            print STDERR "Current command killed by user.";
+        };
+
+        # process has timed out, kill it
+        local $SIG{ALRM} = sub {
+            verbose("Signal ALRM received. Killing timed-out command...");
+            kill_pid($expect->pid()) if defined $expect && $expect->pid();
+            print STDERR message( "Current command killed due to timeout" );
+        };
+
+        # test mode, don't do anything - duh :)
+        if($options{test}) {
+            print STDERR message("Using TEST mode: not running command.");
+            return 0; # jumps to end of eval
+        }
+
+        #
+        # do some Expect automation...
+        #
+
+        # set the process timeout if requested.  this
+        # is before the Expect->spawn(), so if ssh is slow
+        # to respond on a host that will timeout also.
+        alarm $options{timeout} if $options{timeout};
+
+        $expect = new Expect;
+
+        # disable echo to hide password
+        $expect->raw_pty(1);
+
+        $expect->spawn(@$command)
+            or die("Couldn't spawn: $!");
+
+        while($expect->expect(15,"sername")) {
+            print $expect "$ENV{USER}\n";
+        }
+
+        # we may have to enter the password if passwordless ssh isn't setup
+        # and it may be required multiple times (sudo, etc) - loop until 
+        # it's not needed anymore.
+        while($expect->expect(15,"assword")) {
+            print $expect "$password\n";
+        }
+
+        # no further expect commands are needed. At this point it has returned
+        # due to EOF or timeout.
+
+        # message("exit status: " . $expect->exitstatus());
+        # disable the alarm now that $expect has returned
+        alarm 0;
+        
+        # we're done with the expect object, clean it up
+        # so the signal handlers don't think it's valid
+        # and try to kill the process.
+        undef $expect;
+
+        #
+        # end Expect automation.
+        #
+    };
+    if($@) {
+        my $result = $@;
+        chomp($result);
+
+	# this seems odd, so I'm commenting it out. backwards compatability be damned:
+        # trim the additional error messaging added by perl:
+        # "at ./remote-command line 296, <STDIN> line 2."
+        # of course, this means we can't use ' at ' in our
+        # own error messages.
+        # $result =~ s/\s+at\s+.*//; 
+
+        # WARNING this depends on 'exiting' being in
+        # the $SIG{INT} die/fatal string.
+        if($result =~ /exiting/) {
+            $status = 1;
+        }
+        print STDERR message($result);
+    }
+
+    exit $status;
+}
+
+############################################
+
+sub capture
+{
+   my( $msg ) = @_;
+   print "herro: |$msg|\n";
+}
+
+############################################
+
+sub confirm
+{
+   my($prompt, $default) = @_;
+
+   while (1) {
+      print STDERR $prompt;
+
+      chop(my $response = <STDIN>);
+      return $default if (!$response);
+      return "no" if $response =~ /^no?$/i;
+      return "yes" if $response =~ /^y(es)?$/i;
+   }
+}
+
+############################################
+
+sub ping
+{
+   # ping the given hostname to determine availability
+
+   # return the $PING return codes, or -1 if
+   # $PING is not available.
+
+    my $host = shift;
+    
+    # ping not available, or the host is in the EC2 substrate, and cannot be
+    # contacted except via bastion
+    if ($host =~ /\.(?:ec2\.substrate|aes0\.internal|ec2\.border)\.?$/ || ! -x $PING ) {
+        return -1;
+    }
+    
+    my $rc = system("$PING -c 1 -w 2 $host >/dev/null 2>&1");
+    $rc = $rc >> 8;
+    return $rc;
+}
+
+############################################
+
+sub userid
+{
+    # get the user name (for logging)
+    # if we detect we are in a web server context, return web_server_name:remote_user_name
+
+    my $login = getpwuid($<);
+
+    # augment the login if this script is being run by
+    # a web server on behalf of a user.  In this case,
+    # the REMOTE_USER environment variable will be set
+    # with the username that was used in http authentication
+
+    $login .= ":$ENV{REMOTE_USER}" if($ENV{REMOTE_USER});
+
+    return $login;
+}
+
+############################################
+
+sub message
+{
+   my ($message) = @_;
+
+   # returns your msg log-formatted
+   # which you can use to print or to save for later
+
+   my $timestamp = strftime $options{time_format}, localtime;
+   # return "[$timestamp] $message\n";
+   return "$message\n";
+}
+
+############################################
+
+sub verbose
+{
+   my ($message) = @_;
+
+   # if in verbose mode, print message to STDERR (the interactive channel for this program).
+
+   print STDERR "$message\n" if $options{verbose};
+}
+
+############################################
+
+sub do_log
+{
+    my ($message) = @_;
+
+    print $message;
+
+    if($audit_fh) {
+        print $audit_fh $message;
+    }
+}
+
+############################################
+#
+# Return all hosts belonging to this hostclass.
+# If there are errors during host lookup, the
+# program will die.  Thus, an empty result
+# set is not (necessarily) an indication of
+# a lookup failure.
+
+sub get_hosts_for_hostclass
+{
+    my $hostclass = shift;
+
+    # list hosts in a given hostclass
+
+    if (!defined $ldap) {
+	$ldap = Net::LDAP->new('ldap.amazon.com');
+	$ldap->bind;
+    }
+    my $mesg = $ldap->search (
+                       base   => "ou=systems,ou=infrastructure,o=amazon.com",
+                       filter => "amznDiscoHostClass=$hostclass",
+                       attrs => ['amznhwinfokernelversion'] #placeholder
+                       );
+
+    # die if there's a lookup failure
+    if ($mesg->code) { warn $mesg->error,"\n"; }
+    $mesg->code && die $mesg->error;
+
+    # grab all hosts and return them
+    my @host_names;
+
+    my @entries = $mesg->entries;
+    foreach my $entr ( @entries )
+    {
+        my $hostname =  $entr->dn;
+        $hostname =~ s/,ou=systems,ou=infrastructure,o=amazon.com//g;
+        $hostname =~ s/cn=//g;
+        push @host_names, $hostname;
+    }
+
+    return @host_names;
+}
+
+############################################
+#
+# Return all hosts belonging to this hostclass
+# and its inheritors.  Each hostclass is
+# checked for both hosts and children.  The
+# results are returned in pre-order (in case
+# anybody cares).
+# 
+# WARNING: This could return a *lot* of hosts!
+
+sub get_hosts_for_hostclass_recursively
+{
+    my $hostclass = shift;
+    my $hostclass_lookups_ref = shift;
+    if ($$hostclass_lookups_ref > $options{recurse}) {
+	die "Exceeded max allowed hostclass lookups: $options{recurse}.  Try a higher --recurse value.\n";
+    }
+
+    my @return_hosts = ();
+
+    # first get this hostclass's hosts
+    my @these_hosts = get_hosts_for_hostclass($hostclass);
+
+    # it's okay if there are no results; many hostclasses have no actual hosts
+    push @return_hosts, @these_hosts;
+
+
+    # next get the child classes of this hostclass
+    if (!defined $ldap) {
+	$ldap = Net::LDAP->new('ldap.amazon.com');
+	$ldap->bind;
+    }
+    my $mesg = $ldap->search (
+                       base   => "ou=classes,ou=disco,ou=infrastructure,o=amazon.com",
+                       filter => "amznDiscoHostClass=$hostclass",
+                       attrs => ['amznhwinfokernelversion'] #placeholder
+                       );
+
+    ++$$hostclass_lookups_ref;
+
+    # die if there's a lookup failure
+    if ($mesg->code) { warn $mesg->error,"\n"; }
+    $mesg->code && die $mesg->error;
+
+    my @host_classes;
+
+    my @entries = $mesg->entries;
+    foreach my $entr ( @entries )
+    {
+        my $hostclass =  $entr->dn;
+        $hostclass =~ s/,ou=classes,ou=disco,ou=infrastructure,o=amazon.com//g;
+        $hostclass =~ s/cn=//g;
+        push @host_classes, $hostclass;
+    }
+
+    # for each child hostclass, recurse (depth-first); the base case of the
+    # recursion is when the list of child hostclasses is empty
+    foreach my $child_class (@host_classes) {
+	push @return_hosts, get_hosts_for_hostclass_recursively($child_class, $hostclass_lookups_ref);
+    }
+
+    return @return_hosts;
+}
+
+############################################
+
+sub get_hosts_for_environment
+{
+    my $rawEnvironment = shift;
+    my $environment = dirname($rawEnvironment);
+    my $stage = basename($rawEnvironment);
+
+    die("Invalid environment: $environment") if !$environment;
+    die("Invalid stage: $stage") if !$stage || $stage !~ /^(Alpha|Beta|Gamma|Prod)$/;
+    verbose("Using environment $environment, stage $stage\n");
+
+    my $environmentName = uri_escape($environment);
+    my $envIdResponse = get("http://apollo-environment.amazon.com/environments/$environmentName");
+    die("Unable to get environment $environment") if !$envIdResponse;
+    my $envIdResponseDoc = XMLin($envIdResponse);
+    my $envId = $envIdResponseDoc->{numericId};
+    die("Unable to determine id for environment $environment") if !$envId;
+    
+    my $hostRequest = "http://apollo-environment.amazon.com/environments/" . $envId . "/stages/$stage/capacity";
+    my $hostResponse = get("$hostRequest");
+    die("Unable to get hosts for environment $environment") if !$hostResponse;
+    my $hostResponseDoc = XMLin($hostResponse);
+    
+    my $envCapacity = $hostResponseDoc->{capacitySet}->{capacity};
+    $envCapacity = [ $envCapacity ] if (ref($envCapacity) ne 'ARRAY');
+    
+    my @hostClasses;
+    my @hosts;
+
+    foreach my $capacityEntry (@{$envCapacity}) {
+        if ($capacityEntry->{hostclass}) {
+            my $hostClass = $capacityEntry->{hostclass}->{id};
+            push @hostClasses, $hostClass;
+            verbose("Apollo hostclass: $hostClass\n");
+        }
+        if ($capacityEntry->{host}) {
+            my $host = $capacityEntry->{host}->{id};
+            push @hosts, $host;
+            verbose("Apollo host: $host\n");
+        }
+        if ($capacityEntry->{autoScalingGroup}) {
+            my $autoScalingGroup = $capacityEntry->{autoScalingGroup}->{id};
+            push @hosts, get_hosts_for_autoscalinggroup($autoScalingGroup);
+            verbose("Apollo auto scaling group: $autoScalingGroup\n");
+        }
+    }
+
+    my $hostclass_lookups = 0;
+
+    foreach my $hostClass (@hostClasses) {
+        my @hostClassHosts;
+        if (defined $options{recurse}) {
+            @hostClassHosts = get_hosts_for_hostclass_recursively($hostClass, \$hostclass_lookups);
+        } else {
+            @hostClassHosts  = get_hosts_for_hostclass($hostClass);
+        }
+        push @hosts, @hostClassHosts;
+    }
+
+    return @hosts;
+}
+
+############################################
+
+sub get_hosts_for_autoscalinggroup {
+     my $rawAsg = shift;
+     
+     my $asgName = uri_escape($rawAsg);
+     my $asgResponse = get("http://apollo-host.amazon.com/autoScalingGroups/$asgName");
+     die("Unable to get auto scaling group $rawAsg") if !$asgResponse;
+     
+     my $asgDoc = XMLin($asgResponse, ForceArray => ["id"]);
+     
+     return @{$asgDoc->{hostList}->{id}};
+}
+
+############################################
+
+sub kill_pid {
+    my $kpid = shift;
+
+    # try hard to kill the given pid.
+    # returns 1 for success, 0 for failure.
+    # b/c of the sleep, can take up to 6sec to return.
+
+    # kill nicely
+    kill 2, $kpid;
+    sleep 2;
+
+    # kill nicely again
+    my $remaining = kill 0, $kpid;
+    if($remaining) {
+        kill 2, $kpid;
+        sleep 2;
+    }
+
+    # terminate
+    $remaining = kill 0, $kpid;
+    if($remaining) {
+        kill 9, $kpid;
+        sleep 2;
+    }
+
+    $remaining = kill 0, $kpid;
+    if($remaining) {
+        # return failure if process is still alive
+        return 0;
+    } else {
+        # return success if process is dead
+        return 1;
+    }
+}
+
+############################################
+
+sub usage_and_die {
+    die <<ENDOFUSAGE;
+
+$0 --server <server> [--server <server> ...] "<command>"
+$0 --class <host class> [--class <host class> ...] "<command>"
+$0 --environment <environment> [--environment <environment> ...] "<command>"
+$0 --server <server> --class <host class> --environment <environment> ... "<command>"
+
+$0 --parameters <input file> "<command>"
+cat <input file> | $0 --parameters "<command>"
+
+Run autonomous commands on servers and host classes via SSH, or
+execute multiple commands using an input file. Your password is
+cached and re-used using Expect, so you only need to enter it
+once.  Works for sudo as well.  (That is, using sudo inside
+your command will work.  Running remote-command under sudo, on
+the other hand, is probably not what you want.)
+
+Ctrl-\\ (control+backslash) will kill the command on the current
+server and move to the next server/command in the list.
+
+Ctrl-C (control+c) will kill the command on the current server
+and exit.
+
+CAUTION: There is NO error checking performed on the commands
+being executed.  This means that if the command fails, you need
+to be monitoring the output to see the error and notice the
+failure.  Failures will be reported for invalid or unavailable
+servers.
+
+More information at: http://wiki.amazon.com/?RemoteCommand
+
+REQUIRED:
+
+"<command>"
+    The command to be executed.  This must be quoted if there are
+    spaces in the command.
+
+    The command can contain the keyword "SERVER", which will be
+    replaced with each server name if you use the --server flags.
+
+    The command can contain multiple value placeholders '?', which 
+    will be replaced with the values from the input columns if you 
+    use the --parameter flag.
+
+AND ONE OF:
+
+--server <server>
+    Name of server to execute the command on.  Can be specified
+    multiple times:
+
+    --server host_A --server host_B ...
+
+--class <host class>
+    Name of a host class to execute the command on.  Can be 
+    specified multiple times:
+
+    --class ScosAppNA --class ScosAppEU ...
+
+--environment <environment>
+    Name of an Apollo environment to execute the command on.
+    Executes the command on all hosts in the environment. Required
+    format is EnvironmentName/Stage, where stage is one of
+    Alpha|Beta|Gamma|Prod. Can be specified multiple times:
+
+    --environment EnvImprovement/Prod --environment EnvImprovement/child/Beta ...
+
+(NOTE: --server and --class and --environment can be mixed together)
+
+    Additional - see below for more information:
+        --recurse
+        --restrict-servers
+        --exclude-servers
+
+OR:
+
+--parameters 
+    Indicates that required data will be piped from STDIN.  Input
+    should be TAB delimited, 1 row per command.  The first column
+    is assumed to be the server name:
+
+    host_A	value1	value2
+    host_B	value1	value3
+
+    The values will be substituted into the "<command>" string, 
+    replacing the '?' placeholders in sequential order.
+
+--parameter /path/to/file/input.txt
+    Similar to above, but input is read from a file instead 
+    of STDIN.
+
+OPTIONAL:
+
+--recurse [N]
+    Use servers belonging to the classes specified with --class AND
+    all classes inheriting from those.  (Has no effect on --server
+    or --environment options.)
+
+    If N is specified, the program will terminate with a warning
+    message after N hostclass lookups are performed.  If not
+    specified, N defaults to 10.  Non-positive values are ignored.
+
+--restrict-server <pattern> [--restrict-server <pattern> ...]
+    Only use the servers which match the given pattern.  Useful
+    for connecting to only a subset of servers in a hostclass.
+    
+    Cannot be used with --parameters.
+    
+    Examples: 
+        --restrict-server vdc 
+        --restrict-server fpena
+        --restrict-server scos-fpe-1201
+    
+    would only match servers with 'iad2' in their name, such as:
+    
+    scos-fpe-1201.vdc.amazon.com
+
+    This can be specified multiple times to create a list of
+    patterns.
+
+    Note: --servers will override these patterns and always be 
+    included in the servers list.
+
+--exclude-server <pattern> [--exclude-server <pattern> ...]
+    Do not use the servers which match the given pattern.  Useful
+    for skipping hosts, such as the active host in a hostclass.
+
+    Cannot be used with --parameters.
+
+    Example: 
+        --exclude-server vdc
+        --exclude-server fpena
+        --exclude-server scos-fpe-1201
+
+    would skip the given host. This can be specified multiple
+    times to create a list of patterns.
+    
+    Note: --servers will override these patterns and always be 
+    included in the servers list.
+    
+--manual
+    Do not include the command in an SSH statement, instead 
+    execute the actual command that is given.  Useful if you
+    want to SCP instead of SSH, or other non-SSH commands.
+
+    NOTE: When using --manual with --parameters, the assumption
+    regarding the first column as server names is ignored - you
+    need to have placeholders for ALL columns in the input file.
+    
+--delay [N]
+    The delay in seconds between commands.  If no value is provided,
+    the user will be prompted to continue. This is useful if you 
+    need to wait for a server to fully recover before moving to
+    the next command/server, or need to check logs/processes/etc.
+
+--batch [N]
+    The number of commands to run at once.  If no value is provided,
+    all commands/servers will be run at once.  By default, commands
+    are run one at a time.
+
+--kill N
+    The timeout in seconds for the command to run on each server
+    before it is killed and the command is executed on the next 
+    server.  Some commands do not exit nicely, this is a good way
+    to force an exit without manual intervention.
+
+--die-on <regex>
+    If any line of stdout or stderr on any server matches the regex,
+    remote-command will exit.  If this included when batch > 1, the
+    batch will finish before exit.
+
+--test
+    Do not execute the command or connect to the servers -- just
+    print the commands that would be executed.
+
+--force
+    Skip the command confirmation.  This is NOT recommended as
+    you will not be asked to review the commands to be executed.
+
+--no-password
+    Skip the password entry.  This is useful if you already
+    have password-less SSH setup, or are executing manual 
+    commands which do not require a password.
+
+--verbose
+    Print extra progress messages.
+
+--text-output
+    Only print out text output from commands, so that STDOUT is suitable for
+    redirection to a file
+
+ADVANCED:
+
+--override-ssh <your ssh>
+    Override the default SSH with your own version.
+    Default:
+        @SSH_DEFAULT
+
+    (Warning: This string is parsed into command line arguments 
+    using a simple split on whitespace. If you need spaces embedded
+    in a single argument, use --override-ssh-arg instead.)
+
+--override-ssh-arg <your ssh arg1> ...
+    Override the default SSH with your own version, argument by 
+    argument.
+    Example:
+        --override-ssh-arg /usr/bin/ssh --override-ssh-arg '-o' --override-ssh-arg 'StrictHostKeyChecking=no'
+
+--override-ping <your ping>
+    Override the default PING with your own version. Ping is used to
+    determine server validity, for servers which do not require an
+    SSH bastion to connect (see 'SSH VIA BASTIONS' below).
+    Default:
+        $PING
+
+--override-prompt <prompt>
+    Ignored but retained for backwards compatibility. 
+
+--audit-log <audit log path>
+    Path to use for logging an audit-like copy of most output.  Can include
+    strftime() formatting codes.  Parent directories will be created
+    automatically.
+    Example:
+        --audit-log '/home/kamling/.remote-command-logs/%Y-%m-%d/audit.%Y-%m-%d-%H-%M-%S'
+
+--time-format <format string>
+    strftime() format string to use for <starttime> and <endtime> tags.
+    Examples:
+        --time-format '%Y/%m/%d %H:%M:%S'
+        --time-format '%s'
+    Default:
+        %Y%m%d %T %Z
+
+SSH VIA BASTIONS:
+
+Certain hosts are accessible only via SSH bastions, such as hosts in the
+EC2 substrate; by setting up your ~/.ssh/config file appropriately, it is
+still possible to use "remote-command" to SSH to these hosts.  More details:
+
+  https://w.amazon.com/index.php/EC2/Security/SSH_Hardening/Announcement
+  https://w.amazon.com/index.php/NetAuto/Ec2SshViaBastion
+
+RC FILE:
+
+You may have a ~/.remote-commandrc which will be read and have each line
+prepended as an extra argument to remote-command.  Lines that are all
+whitespace are ignored, as are lines whose first non-whitespace character is a
+pound sign.  As an example, these lines set up a different time format:
+
+# I prefer fully delimited, big endian
+--time-format
+%Y/%m/%d %H:%M:%S %Z
+
+And this could set up to always run without password and without confirmation
+
+# We live dangerously
+--force
+--no-pass
+
+More information at: http://wiki.amazon.com/?RemoteCommand
+
+ENDOFUSAGE
+}

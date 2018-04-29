@@ -1,0 +1,3 @@
+find . -type f -exec sha1sum {} \; | while read sum file;do file=$(echo $file | sed 's/^\.//'); file="$(pwd)$file";path=$(dirname $file);echo "insert into file_dedupe.files (filename,checksum,path) values (\"$file\",$sum,\"$path\")";done
+
+c=0;ins="insert into file_dedupe.files (filename,checksum,path) values";find . -type f -exec sha1sum {} \; | while read sum file;do file=$(echo $file | sed 's/^\.//'); file="$(pwd)$file";path=$(dirname $file); this="(\"$file\",$sum,\"$path\")"; if [ $c -lt 50 ];then stmt="$stmt, $this"; let c++;else stmt="$stmt, $this";echo $ins $stmt;c=0;fi ;done

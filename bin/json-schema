@@ -1,0 +1,80 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'yaml'
+require 'json-schema'
+require 'optparse'
+require 'awesome_print'
+
+errors     = []
+options    = {}
+keep_going = true
+
+#  if config is json
+#    return json.load stuff. 
+#  else
+#    if config is yaml
+#      return yaml.load stuff.
+#    else
+#      return false
+#    end
+#  end
+
+def is_json?(config)
+  JSON.load(File.read(config).chomp)
+rescue
+  is_yaml? config
+end
+
+def is_yaml?(config)
+  YAML.load(File.read(config).chomp)
+rescue
+  false
+end
+
+OptionParser.new do |opts|
+  opts.banner = 'Usage: %s [options]' % ARGV[0]
+  opts.on('-s <path>', '--schema=<path>', String, 'Path to schema') \
+  {|arg|
+    if File.exists?(arg) 
+      options[:schema] = arg 
+    else
+      $stderr.puts 'Path supplied for --schema is invalid.'
+    end
+  }
+
+  opts.on('-c <path>', '--config=<path>', String, 'Path to config file.') \
+  {|arg|
+    if File.exists?(arg) 
+      options[:config] = arg 
+    else
+      $stderr.puts 'File supplied for --config is invalid.'
+    end
+  }
+
+  opts.on('-v', '--[no-]verbose', 'Verbose output') \
+  {|arg|
+    options[:verbose] = arg
+  }
+end.parse!
+
+[:schema, :config].each \
+{|req|
+  if options[req].nil?
+    $stderr.puts 'argument --%s is required' % req
+    keep_going = false
+  end
+}
+
+if keep_going
+  config_data   = is_json? options[:config]
+
+  errors = JSON::Validator.fully_validate(options[:schema], config_data, 
+                                            {
+                                              :validate_schema => true, 
+                                              :clear_cache     => true,
+                                            }
+                                         )
+  ap errors
+end
+

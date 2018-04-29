@@ -1,0 +1,17 @@
+#!/usr/bin/perl -lw
+
+use strict;
+
+my($issuer, $cert_content, $cert);
+
+$cert = $ARGV[0] or die('argument required: certificate to read');
+open(F, '<' . $cert)
+  or die('Unable to read certificate: ' . $!);
+
+$cert_content = <F>; 
+
+$issuer = $1        if $cert_content =~ /Issuer: CN=(.*)/;
+$cert  .= $_ . "\n" if $cert_content =~ /BEGIN CERTIFICATE/../END CERTIFICATE/;
+
+$issuer = join("_", split(/ /, $issuer)) . ".pem" if ( $issuer );
+print "issuer:\n$issuer\ncert:\n$cert"

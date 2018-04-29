@@ -1,0 +1,142 @@
+#!/bin/bash
+
+_mac_deps_install()
+{
+  reqs=(git-lfs git-secret gnupg)
+
+  if ! brew help >/dev/null 2>&1
+  then
+    echo >&2 """
+This script requires that you have brew installed. Please
+read https://brew.sh/ and follow the
+instructions. Re-run this script when you're done. Note that
+you may be required to install xcode, so you'll want to install
+that first from the Apple app store.
+    """
+
+    return 10
+  fi
+
+  if cd /var/tmp
+  then
+    for req in "${reqs[@]}"
+    do
+      if ! command -v "$req"
+      then
+        echo "Installing $req..."
+        if brew install "$req" 2>/dev/null
+        then
+          echo "$req is successfully installed"
+        else
+          echo >&2 """
+    There was a problem installing $req. Please try
+    running 'brew install $req' manually. Quitting.
+          """
+        fi
+      fi
+    done
+  fi
+}
+
+_ubuntu_pkg_prep()
+{
+  sudo "$pm_install" apt-transport-https
+  echo "deb https://dl.bintray.com/sobolevn/deb git-secret main" | sudo tee -a /etc/apt/sources.list
+  wget -qO - https://api.bintray.com/users/sobolevn/keys/gpg/public.key | sudo apt-key add -
+  sudo apt-get update
+}
+
+_fedora_pkg_prep()
+{
+  wget https://bintray.com/sobolevn/rpm/rpm -O bintray-sobolevn-rpm.repo
+  sudo mv bintray-sobolevn-rpm.repo /etc/yum.repos.d/
+}
+
+_linux_deps_install()
+{
+  sudo ls > /dev/null
+
+  reqs=(git-lfs git-secret gnupg2)
+  distro="$(lsb_release -si)"
+
+  if ! which lsb_release >/dev/null 2>&1
+  then
+    echo >&2 """
+This script requires the installation of the 'lsb_release' command. Please
+install it via your distribution's package management and then re-run
+this script.
+    """
+  fi
+
+  case $distro in
+    Ubuntu|Debian)
+      pm_install="sudo apt-get install -y"
+      pkg_prep=_ubuntu_pkg_prep
+    ;;
+    RedHat|Fedora)
+      pm_install="sudo dnf install -y"
+      pkg_prep=_fedora_pkg_prep
+    ;;
+    *) echo "I only know how to work with Ubuntu/Debian and RedHat/Fedora."
+       return 11
+    ;;
+  esac
+
+  if cd /var/tmp
+  then
+    for req in "${reqs[@]}"
+    do
+      if command -v "$req" >/dev/null 2>&1
+      then
+        echo "Looks like '$req' is installed...moving on."
+      else
+        [[ "$req" == "git-secret" ]] && $pkg_prep
+
+        $pm_install "$req"
+      fi
+    done
+  fi
+}
+
+main()
+{
+  git_root_path="$(git rev-parse --show-toplevel)"
+
+  case $(uname -s) in
+    Linux)
+      if _linux_deps_install
+      then
+        echo "done."
+      else
+        return $?
+      fi
+    ;;
+    Darwin)
+      if _mac_deps_install
+      then
+        echo "done."
+      else
+        return $?
+      fi
+    ;;
+    *) echo >&2 "Unable to perform installation for this platform. Sorry."
+    ;;
+  esac
+
+  if cp -avp --backup "$git_root_path"/bin/hooks/* "$git_root_path"/.git/hooks
+  then
+    echo "Hooks copied."
+  else
+    echo >&2 """
+There was a problem copying hooks to $git_root_path/.git/hooks. You
+may need to investigate.
+  """
+  fi
+}
+
+if ! main
+then
+  exit $?
+else
+  echo "All done."
+fi

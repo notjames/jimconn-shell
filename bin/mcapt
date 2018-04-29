@@ -1,0 +1,26 @@
+#!/bin/bash
+
+ip=$1
+
+while true
+do
+    ipup=$(ping -t 1 -c 1 $ip > /dev/null 2>&1;echo $?)
+
+    if [ "$ipup" = 0 ]
+    then
+       tcpup=$(tcping $ip 22 > /dev/null 2>&1;echo $?)
+
+       if [ "$tcpup" = 0 ]
+       then
+          echo
+          (s $ip)
+          exit
+       else
+           echo -n 'p'
+       fi
+    else
+        echo -n '.'
+    fi
+
+    sleep 1
+done

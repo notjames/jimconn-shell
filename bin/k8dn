@@ -1,0 +1,46 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+my $seek_items = $ARGV[0] || q(Name Labels/nodepool Addresses/InternalDNS;ExternalDNS Events);
+my @seek_items = split(/ /, $seek_items);
+open(my $fd, '-') or die("Required output through stdin from `kubectl describe nodes`");
+
+while ( <$fd> )
+{
+  chomp();
+
+  my $each_node = /^Name:/ .. /^$/;
+
+  print "LINE: '$_'    EACH_NODE: $each_node\n";
+
+  if ( $each_node !~ /E0/ )
+  {
+    my $this_node_eo = /^\w+:/ .. //;
+    print "   DBUG: ON NODE TOPIC EO: $this_node_eo\n";
+    for my $seek_topic ( @seek_items )
+    {
+      print "   DBUG: SEEKING TOPIC: $seek_topic\n";
+      my(@subtopics, $subtopics);
+
+      if ( $seek_topic =~ /\// )
+      {
+        $subtopics = (split(/\//, $seek_topic))[1];
+        @subtopics = split(/;/, $subtopics);
+      }
+
+      print "     DBUG: SUB-TOPICS: " . scalar(@subtopics) ."\n";
+      print $_ . "\n" if ( /\Q$seek_topic\E:/ );
+
+      for my $subt ( @subtopics )
+      {
+        print "      DBUG: SUB-TOPIC: $subt\n";
+        print $_ . "\n" if ( /^\s+\Q$subt\E/ );
+      }
+    }
+  }
+  else
+  {
+    print "-="x10 . " \n";
+  }
+}

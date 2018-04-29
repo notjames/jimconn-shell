@@ -1,0 +1,7 @@
+#!/bin/bash
+
+source $SKOPOS
+
+# Note that this is a function call of `skopos`
+# which is set in ~/.bash/skopos/skopos.bash
+#skopos $@

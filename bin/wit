@@ -1,0 +1,50 @@
+#!/usr/bin/perl -lw
+
+use strict;
+use Data::Dumper;
+
+my $first_match;
+my $switch;
+my $ctr = 0;
+my $l;
+
+while ( <> )
+{
+    chomp();
+    my @matches;
+    my $eo = (/8021x_full_auth/) .. (/roam_took/);
+
+    s/^\s+/    /g;
+    
+    if ( $ctr == 0 )
+    {
+        @matches = /(8021x_full_auth|roam_evt_start|roam_took)/;
+
+        if ( $1 )
+        {
+            $first_match = $1;
+            $switch = 1 if $first_match =~ /8021/;
+        }
+
+        $ctr++;
+    }
+
+    next if ~~@matches > 0;
+#    print 'eo: ' . $eo . ' - fm: ' . $first_match;
+#    print '$_: ' . $_;
+    if ( $eo !~ /E0/ )
+    {
+        if ( /\Q$first_match\E/ )
+        {
+            $l = $_;
+        }
+        else
+        {
+            $l .= $_;
+        }
+    }
+    else
+    {
+        ( $switch ) ? print $l . $_ : print $_ . $l;
+    }
+}

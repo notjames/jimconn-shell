@@ -1,0 +1,20 @@
+#!/bin/bash
+
+juju status --format json | \
+jq '
+def machine($id):
+  first(.applications[]
+    | (.units? // empty)
+    | to_entries[]
+    | select(.value.machine == $id)
+    | .key ) ;
+
+[. as $in
+| .machines
+| to_entries[]
+| .key as $key
+| {($key): (.value | {
+            "unit-name": .["instance-id"],
+            "machine": ($in|machine($key))
+        }) }]
+'
