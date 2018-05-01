@@ -2,11 +2,14 @@
 
 cnct_clone()
 {
-  set -e
-  repo="{$1:?Must provide repo name}"
+  local ghub repo repo_name client_repo upstream_repo
 
-  git clone https://github.com/$USER/$repo && cd $repo && git remote add upstream https://github.com/samsung-cnct/$repo
-  set +e
+  ghub="git://github.com/"
+  repo_name="${1:?Must provide repo name}"
+  client_repo="${ghub}notjames/$repo_name"
+  upstream_repo="${ghub}samsung-cnct/$repo_name"
+
+  git clone "$client_repo" && cd "$repo_name" && git remote add upstream "$upstream_repo"
 }
 
 fix_fsp()
