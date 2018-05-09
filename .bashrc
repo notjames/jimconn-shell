@@ -55,9 +55,9 @@ shopt -s checkwinsize
 [ -x /usr/bin/kubectx ] && K8SCTX=$(kubectx | sed 's/_.*//')
 [ -x /usr/bin/vim ] && alias vi="/usr/bin/vim -p"
 [ -x /usr/local/bin/vimcat ] && alias cat='/usr/local/bin/vimcat -n --colors=256'
-[ -f ~/.fzf.bash ] && source ~/.fzf.bash
+[ -f $HOME/.bash/.fzf.bash ] && source $HOME/.bash/fzf/fzf.bash
 [ -x /usr/local/bin/ggrep ] && alias grep='/usr/local/bin/ggrep'
-[ -f ~/.acd_func.sh ] && source ~/.acd_func.sh
+[ -f $HOME/.bash/acd/acd_func.sh ] && source $HOME/.bash/acd/acd_func.sh
 
 # make less more friendly for non-text input files, see lesspipe(1)
 [ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
