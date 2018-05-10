@@ -41,6 +41,11 @@ cluster_name()
         if [[ -e $cfg ]]
         then
           clname=$(< "$cfg" yaml2json - | jq -rc "$branch")
+
+          if [[ "$clname" != "null" ]] && [[ "$clname" != "" ]]
+          then
+            break 2
+          fi
         fi
       done
     done
