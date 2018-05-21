@@ -26,7 +26,7 @@ cluster_name()
   local configs json_branches clname c
 
   clname="null"
-  configs=("$KRAKEN/config.yaml" "$(find . -name "*-bundle.yaml")")
+  configs=("$KRAKEN/config.yaml" "$(find $HOME -name "*-bundle.yaml" 2>/dev/null)")
   json_branches=('.deployment.clusters[0].name' '.deployment.cluster' '.name')
   c=0
 
@@ -42,7 +42,7 @@ cluster_name()
         then
           clname=$(< "$cfg" yaml2json - | jq -rc "$branch")
 
-          if [[ "$clname" != "null" ]] && [[ "$clname" != "" ]]
+          if [[ "$clname" != "null" ]] && [[ -n "$clname" ]]
           then
             break 2
           fi
@@ -78,6 +78,7 @@ cluster_path()
 setup_cluster_env()
 {
   local PROSPECT_KCFG KENV_RET
+  unset JUJU_DATA KUBECONFIG 2>/dev/null
 
   PROSPECT_KCFG=($KRAKEN/$CLUSTER_NAME $KRAKEN $(find "$(realpath "$KRAKEN")" -name 'admin.kubeconfig'))
 
@@ -96,40 +97,49 @@ setup_cluster_env()
       do
         pcfg=${pcfg/\/admin.kubeconfig/}
 
-        [[ -f $pcfg/admin.kubeconfig ]] && \
-          JUJU_DATA=$pcfg && \
-          KUBECONFIG=$pcfg/admin.kubeconfig && \
+        if [[ -f $pcfg/admin.kubeconfig ]]
+        then
+          JUJU_DATA=$pcfg
+          KUBECONFIG=$pcfg/admin.kubeconfig
+          export KUBECONFIG JUJU_DATA
           break
+        fi
       done
 
-      export CLUSTER_NAME KUBECONFIG HELM_HOME JUJU_DATA
-
-      alias k='kubectl'
-      alias kg='kubectl get -o wide'
-      alias k2="kubectl --kubeconfig=\"\$KUBECONFIG\""
-      alias k2g="kubectl --kubeconfig=\"\$KUBECONFIG\" get -o wide"
-      alias k2ga="kubectl --kubeconfig=\"\$KUBECONFIG\" get -o wide --all-namespaces"
-      alias kssh="ssh -F \"\$KRAKEN/\$CLUSTER_NAME/ssh_config\""
-
-      if [[ -d $KRAKEN ]]
+      if [[ -z $KUBECONFIG ]]
       then
-        if [[ -n "$GLOBAL_HELM" && ! -d $KRAKEN/.helm ]]
+        echo >&2 'Unable to find a proper admin.kubeconfig. Is this a valid cluster?'
+        return 155
+      else
+        export CLUSTER_NAME HELM_HOME
+
+        alias k='kubectl'
+        alias kg='kubectl get -o wide'
+        alias k2="kubectl --kubeconfig=\"\$KUBECONFIG\""
+        alias k2g="kubectl --kubeconfig=\"\$KUBECONFIG\" get -o wide"
+        alias k2ga="kubectl --kubeconfig=\"\$KUBECONFIG\" get -o wide --all-namespaces"
+        alias kssh="ssh -F \"\$KRAKEN/\$CLUSTER_NAME/ssh_config\""
+
+        if [[ -d $KRAKEN ]]
         then
-    #      echo -e "\nLinking $KRAKEN/.helm to $HOME/.helm"
-    #      echo -e "If this is undesirable, run 'rm \$KRAKEN/.helm'\n"
-          ln -sf "$GLOBAL_HELM" "$KRAKEN"/
-        else
-          if rm "$KRAKEN"/.helm 2>/dev/null
+          if [[ -n "$GLOBAL_HELM" && ! -d $KRAKEN/.helm ]]
           then
-            if ! ln -sf "$GLOBAL_HELM" "$KRAKEN"/
-            then
-              echo >&2 "Unable to link global .helm to cluster space. mv error code was $?"
-            fi
+      #      echo -e "\nLinking $KRAKEN/.helm to $HOME/.helm"
+      #      echo -e "If this is undesirable, run 'rm \$KRAKEN/.helm'\n"
+            ln -sf "$GLOBAL_HELM" "$KRAKEN"/
           else
-            echo >&2 """
-            Your cluster space already has a .helm in it and it could not be moved.
-            mv error code was $?
-            """
+            if rm "$KRAKEN"/.helm 2>/dev/null
+            then
+              if ! ln -sf "$GLOBAL_HELM" "$KRAKEN"/
+              then
+                echo >&2 "Unable to link global .helm to cluster space. mv error code was $?"
+              fi
+            else
+              echo >&2 """
+              Your cluster space already has a .helm in it and it could not be moved.
+              mv error code was $?
+              """
+            fi
           fi
         fi
       fi
@@ -217,7 +227,7 @@ skopos_create_env()
 
   if skopos_switch $new_cfg_loc
   then
-    kraken generate $@
+    kraken generate "$@"
 
 ## I liked the way the following works but it's too complicated
 ## and it rewrites the structure of the config.yaml in such a way
@@ -353,11 +363,13 @@ skopos_usage()
 ## This is the main function
 skopos()
 {
+  unalias k2 kssh k2ga k2g kg k 2>/dev/null
+
   local prereqs="yaml2json jq ruby"
 
   for pr in $prereqs
   do
-    if ! which $pr >/dev/null 2>&1
+    if ! which "$pr" >/dev/null 2>&1
     then
       echo 2>& "Pre-requisite '$pr' is not found on system or in \$PATH"
       return 60
@@ -376,12 +388,12 @@ skopos()
           list|l|ls)
             shift
             set -- "$@"
-            skopos_list $@
+            skopos_list "$@"
           ;;
           switch|s|sw)
             shift
             set -- "$@"
-            skopos_switch $@
+            skopos_switch "$@"
             setup_cluster_env
             break
           ;;
@@ -393,7 +405,7 @@ skopos()
           init|i)
             shift
             set -- "$@"
-            skopos_init $@
+            skopos_init "$@"
             setup_cluster_env
             break
           ;;
@@ -401,7 +413,7 @@ skopos()
             shift
             set -- "$@"
 
-            skopos_create_env $@
+            skopos_create_env "$@"
 
             setup_cluster_env
             echo "Switched to $new_base. You're all set."
@@ -410,7 +422,7 @@ skopos()
           delete|d|r|rm|del)
             shift
             set -- "$@"
-            skopos_rm  $@
+            skopos_rm  "$@"
             break
           ;;
           *)
