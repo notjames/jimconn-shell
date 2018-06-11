@@ -50,6 +50,15 @@ Plug 'fatih/vim-go'
 " editorconfig
 Plug 'editorconfig/editorconfig-vim'
 
+" airline
+Plug 'vim-airline/vim-airline'
+
+" gruvbox theme
+Plug 'morhetz/gruvbox'
+
+" github.com/vim-airline/vim-airline-themes
+Plug 'vim-airline/vim-airline-themes'
+
 " Initialize plugin system
 call plug#end()
 set timeoutlen=1000 ttimeoutlen=10
@@ -147,4 +156,41 @@ colo koehler
 " turn on indentation lines
 set conceallevel=1
 let g:indentLine_conceallevel=1
-set listchars=tab:\|\
+"set listchars=tab:\|\
+
+" http://nerditya.com/code/guide-to-neovim/
+"
+" Tell Vim which characters to show for expanded TABs,
+" trailing whitespace, and end-of-lines. VERY useful!
+if &listchars ==# 'eol:$'
+  set listchars=tab:>\ ,trail:-,extends:>,precedes:<,nbsp:+
+endif
+set list                " Show problematic characters.
+
+" Also highlight all tabs and trailing whitespace characters.
+highlight ExtraWhitespace ctermbg=darkgreen guibg=darkgreen
+match ExtraWhitespace /\s\+$\|\t/
+
+" airline stuffs
+let g:airline#extensions#tabline#enabled = 2
+let g:airline#extensions#tabline#fnamemod = ':t'
+let g:airline#extensions#tabline#left_sep = ' '
+let g:airline#extensions#tabline#left_alt_sep = '|'
+let g:airline#extensions#tabline#right_sep = ' '
+let g:airline#extensions#tabline#right_alt_sep = '|'
+let g:airline_left_sep = ' '
+let g:airline_left_alt_sep = '|'
+let g:airline_right_sep = ' '
+let g:airline_right_alt_sep = '|'
+" let g:airline_theme= 'gruvbox'
+
+augroup Binary
+  au!
+  au BufReadPre  *.bin let &bin=1
+  au BufReadPost *.bin if &bin | %!xxd
+  au BufReadPost *.bin set ft=xxd | endif
+  au BufWritePre *.bin if &bin | %!xxd -r
+  au BufWritePre *.bin endif
+  au BufWritePost *.bin if &bin | %!xxd
+  au BufWritePost *.bin set nomod | endif
+augroup END

@@ -70,7 +70,8 @@ usage()
 {
   echo >&2 """
   Usage: $0 <--cluster-name name> <--identity-file /path/to/id_file> <--ssh-config /path/to/cluster/ssh_config>
-            [--region aws region] [--tmpl /path/to/ssh_config.tmpl] [--key-name something] [--help]
+            <--cluster-type <kraken|juju>> [--region aws region] [--tmpl /path/to/ssh_config.tmpl]
+            [--key-name something] [--help]
 
   Defaults:
   region        : us-east-1
@@ -87,7 +88,7 @@ usage()
 declare -gA POOLCOUNT
 whereami
 
-TEMP=$(getopt -an "$0" --long help,region:,cluster-type:,tmpl:,cluster-name:,id-file:,ssh-config: -o hr:T:t:C:i:c: -- "$@")
+TEMP=$(getopt -an "$0" --long help,region:,cluster-type:,tmpl:,cluster-name:,identity-file:,ssh-config: -o hr:T:t:C:i:c: -- "$@")
 eval set -- "$TEMP"
 
 while true
@@ -114,7 +115,7 @@ do
       shift
       CLUSTER_NAME=$1
     ;;
-    --id-file|-i)
+    --identity-file|-i)
       shift
       IDENTITY_FILE=$1
     ;;
