@@ -11,7 +11,8 @@ startup_message off
 defhstatus "^E{+b c}#^En/^Et  ^EH  load: ^El  time: ^EC ^EM/^Ed/^EY"
 #hardstatus on
 #hardstatus alwayslastline
-hardstatus alwayslastline "%{rk}%H %{gk}%c %{yk}%M%d | %{rk} Load: %l %{wk} | %{wk}%?%-Lw%?%{bw}%n*%f %t%?(%u)%?%{wk}%?%+Lw%?"
+#hardstatus alwayslastline "%{rk}%H %{gk}%c %{yk}%M%d | %{rk} Load: %l %{wk} | %{wk}%?%-Lw%?%{bw}%n*%f %t%?(%u)%?%{wk}%?%+Lw%?"
+hardstatus alwayslastline '%{= G}[ %{G}%H %{g}][%= %{= w}%?%-Lw%?%{= R}%n*%f %t%?%{= R}(%u)%?%{= w}%+Lw%?%= %{= g}][ %{y}Load: %l %{g}][%{B}%Y-%m-%d %{W}%c:%s %{g}]'
 
 #caption always "[%h]"
 #caption always "%{+b rk}%H%{gk} |%c %{yk}%d.%m.%Y | %{+b rk}%n%f %t %{bk} | %?%-Lw%?%{bw}%n*%f %t%?(%u)%?%{wk}%?%+Lw%? | %{rk} Load: %l %{wk}"
@@ -23,11 +24,11 @@ vbell_msg ""
 
 altscreen on
 
-defscrollback 9999
+defscrollback 99999
 
 nonblock on
 
-term linux
+#term Eterm
 
 # ==============================================================
 # BIND and the Services:
@@ -60,7 +61,3 @@ screen -t jimconn
 screen -t jimconn
 screen -t jimconn
 screen -t jimconn
-screen -t LinuxVM ssh -X jimconn@linuxvm terminix
-#screen -t LinuxVM ssh jimconn@linuxvm
-#screen -t LinuxVM ssh jimconn@linuxvm
-#screen -t LinuxVM ssh jimconn@linuxvm

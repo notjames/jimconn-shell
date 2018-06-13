@@ -4,7 +4,7 @@ cnct_clone()
 {
   local ghub repo repo_name client_repo upstream_repo
 
-  ghub="git://github.com/"
+  ghub="https://github.com/"
   repo_name="${1:?Must provide repo name}"
   client_repo="${ghub}notjames/$repo_name"
   upstream_repo="${ghub}samsung-cnct/$repo_name"
@@ -131,3 +131,5 @@ alias hd='helm del --purge'
 #alias k2ga='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig get -o wide --all-namespaces'
 #alias kg='kubectl get -o wide'
 #alias kssh='ssh -F /home/jimconn/.kraken/cyklops-superior/ssh_config '
+#alias k2exec='kubectl -n ${NAMESPACE:?"Please set NAMESPACE"} exec -it ${PODNAME:?"Please set PODNAME"} env COLUMNS=$COLUMNS LINES=$LINES TERM=$TERM bash'
+alias kl="docker run -it --rm -v $HOME/projects/src/tahoe.cluster.cnct.io:/tahoe quay.io/samsung_cnct/kraken-lib /bin/bash"

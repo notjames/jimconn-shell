@@ -21,6 +21,16 @@
         name = Jim Conner
         email = snafu.x@gmail.com
 [core]
-        excludesfile = /Users/jimconn/.gitignore
+	excludesfile = /home/jimconn/.gitignore_global
 [credential]
 	helper = store
+#[remote "upstream"]
+#	fetch = +refs/pull/*/head:refs/remotes/origin/pr/*
+[filter "codeformat"]
+	clean = shfmt -i 2 -w -s %f
+	smudge = codeformat %f
+[filter "lfs"]
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
