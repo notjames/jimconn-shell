@@ -136,5 +136,6 @@ alias kl="docker run -it --rm -v $HOME/projects/src/tahoe.cluster.cnct.io:/tahoe
 
 
 alias preview="fzf --preview 'bat --color \"always\" {}'"
+alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
 # add support for ctrl+o to open selected file in VS Code
 export FZF_DEFAULT_OPTS="--bind='ctrl-o:execute(code {})+abort'"
