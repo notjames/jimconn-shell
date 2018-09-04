@@ -141,7 +141,7 @@ if [[ -e "$BASH_SCRIPTS"/skopos/init_skopos ]]; then
 
   if [[ $(echo "$PATH" | grep -c "$HOME"/bin) == 0 ]]
   then
-    PATH="${PATH:+$PATH:}$HOME/bin"
+    PATH="${PATH:+$PATH:}$HOME/bin:$HOME/.local/bin"
     export PATH
   fi
 else

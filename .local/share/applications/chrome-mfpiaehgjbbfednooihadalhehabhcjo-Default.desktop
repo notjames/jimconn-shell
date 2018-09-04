@@ -1,0 +1,9 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Version=1.0
+Terminal=false
+Type=Application
+Name=Awesome Screenshot App
+Exec=/usr/bin/chromium-browser --profile-directory=Default --app-id=mfpiaehgjbbfednooihadalhehabhcjo
+Icon=chrome-mfpiaehgjbbfednooihadalhehabhcjo-Default
+StartupWMClass=crx_mfpiaehgjbbfednooihadalhehabhcjo

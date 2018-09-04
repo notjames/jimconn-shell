@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# This is a randomish md5 to identify this script
+# 138fd403232d2ddd5efb44317e38bf03
+
+pushd "$(dirname "$0")" >& /dev/null
+HERE="$(pwd)"
+popd >& /dev/null
+
+retv=0
+args=""
+
+ENV_PYTHON={sys_executable}
+SKIP_ON_MISSING_CONF={skip_on_missing_conf}
+
+if which pre-commit >& /dev/null; then
+    exe="pre-commit"
+    run_args=""
+elif "$ENV_PYTHON" -c 'import pre_commit.main' >& /dev/null; then
+    exe="$ENV_PYTHON"
+    run_args="-m pre_commit.main"
+elif python -c 'import pre_commit.main' >& /dev/null; then
+    exe="python"
+    run_args="-m pre_commit.main"
+else
+    echo '`pre-commit` not found.  Did you forget to activate your virtualenv?'
+    exit 1
+fi
+
+# Run the legacy pre-commit if it exists
+if [ -x "$HERE"/{hook_type}.legacy ] && ! "$HERE"/{hook_type}.legacy; then
+    retv=1
+fi
+
+CONF_FILE="$(git rev-parse --show-toplevel)/{config_file}"
+if [ ! -f "$CONF_FILE" ]; then
+    if [ "$SKIP_ON_MISSING_CONF" = true -o ! -z "$PRE_COMMIT_ALLOW_NO_CONFIG" ]; then
+        echo '`{config_file}` config file not found. Skipping `pre-commit`.'
+        exit $retv
+    else
+        echo 'No {config_file} file was found'
+        echo '- To temporarily silence this, run `PRE_COMMIT_ALLOW_NO_CONFIG=1 git ...`'
+        echo '- To permanently silence this, install pre-commit with the `--allow-missing-config` option'
+        echo '- To uninstall pre-commit run `pre-commit uninstall`'
+        exit 1
+	fi
+fi
+
+{hook_specific}
+
+# Run pre-commit
+if ! "$exe" $run_args run $args --config {config_file}; then
+    retv=1
+fi
+
+exit $retv

@@ -1,0 +1,22 @@
+Metadata-Version: 2.0
+Name: identify
+Version: 1.0.7
+Summary: File identification library for Python
+Home-page: https://github.com/chriskuehl/identify
+Author: Chris Kuehl
+Author-email: ckuehl@ocf.berkeley.edu
+License: UNKNOWN
+Description-Content-Type: UNKNOWN
+Platform: UNKNOWN
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+
+UNKNOWN
+
+

@@ -1,0 +1,151 @@
+from __future__ import print_function
+from __future__ import unicode_literals
+
+import re
+from collections import OrderedDict
+
+from aspy.yaml import ordered_dump
+from aspy.yaml import ordered_load
+
+import pre_commit.constants as C
+from pre_commit import output
+from pre_commit.clientlib import CONFIG_SCHEMA
+from pre_commit.clientlib import is_local_repo
+from pre_commit.clientlib import is_meta_repo
+from pre_commit.clientlib import load_config
+from pre_commit.commands.migrate_config import migrate_config
+from pre_commit.repository import Repository
+from pre_commit.schema import remove_defaults
+from pre_commit.util import CalledProcessError
+from pre_commit.util import cmd_output
+from pre_commit.util import cwd
+
+
+class RepositoryCannotBeUpdatedError(RuntimeError):
+    pass
+
+
+def _update_repo(repo_config, runner, tags_only):
+    """Updates a repository to the tip of `master`.  If the repository cannot
+    be updated because a hook that is configured does not exist in `master`,
+    this raises a RepositoryCannotBeUpdatedError
+
+    Args:
+        repo_config - A config for a repository
+    """
+    repo = Repository.create(repo_config, runner.store)
+
+    with cwd(repo._repo_path):
+        cmd_output('git', 'fetch')
+        tag_cmd = ('git', 'describe', 'origin/master', '--tags')
+        if tags_only:
+            tag_cmd += ('--abbrev=0',)
+        else:
+            tag_cmd += ('--exact',)
+        try:
+            rev = cmd_output(*tag_cmd)[1].strip()
+        except CalledProcessError:
+            rev = cmd_output('git', 'rev-parse', 'origin/master')[1].strip()
+
+    # Don't bother trying to update if our sha is the same
+    if rev == repo_config['sha']:
+        return repo_config
+
+    # Construct a new config with the head sha
+    new_config = OrderedDict(repo_config)
+    new_config['sha'] = rev
+    new_repo = Repository.create(new_config, runner.store)
+
+    # See if any of our hooks were deleted with the new commits
+    hooks = {hook['id'] for hook in repo.repo_config['hooks']}
+    hooks_missing = hooks - (hooks & set(new_repo.manifest_hooks))
+    if hooks_missing:
+        raise RepositoryCannotBeUpdatedError(
+            'Cannot update because the tip of master is missing these hooks:\n'
+            '{}'.format(', '.join(sorted(hooks_missing))),
+        )
+
+    return new_config
+
+
+SHA_LINE_RE = re.compile(r'^(\s+)sha:(\s*)([^\s#]+)(.*)$', re.DOTALL)
+SHA_LINE_FMT = '{}sha:{}{}{}'
+
+
+def _write_new_config_file(path, output):
+    original_contents = open(path).read()
+    output = remove_defaults(output, CONFIG_SCHEMA)
+    new_contents = ordered_dump(output, **C.YAML_DUMP_KWARGS)
+
+    lines = original_contents.splitlines(True)
+    sha_line_indices_rev = list(reversed([
+        i for i, line in enumerate(lines) if SHA_LINE_RE.match(line)
+    ]))
+
+    for line in new_contents.splitlines(True):
+        if SHA_LINE_RE.match(line):
+            # It's possible we didn't identify the sha lines in the original
+            if not sha_line_indices_rev:
+                break
+            line_index = sha_line_indices_rev.pop()
+            original_line = lines[line_index]
+            orig_match = SHA_LINE_RE.match(original_line)
+            new_match = SHA_LINE_RE.match(line)
+            lines[line_index] = SHA_LINE_FMT.format(
+                orig_match.group(1), orig_match.group(2),
+                new_match.group(3), orig_match.group(4),
+            )
+
+    # If we failed to intelligently rewrite the sha lines, fall back to the
+    # pretty-formatted yaml output
+    to_write = ''.join(lines)
+    if remove_defaults(ordered_load(to_write), CONFIG_SCHEMA) != output:
+        to_write = new_contents
+
+    with open(path, 'w') as f:
+        f.write(to_write)
+
+
+def autoupdate(runner, tags_only, repo=None):
+    """Auto-update the pre-commit config to the latest versions of repos."""
+    migrate_config(runner, quiet=True)
+    retv = 0
+    output_repos = []
+    changed = False
+
+    input_config = load_config(runner.config_file_path)
+
+    for repo_config in input_config['repos']:
+        if (
+            is_local_repo(repo_config) or
+            is_meta_repo(repo_config) or
+            # Skip updating any repo_configs that aren't for the specified repo
+            repo and repo != repo_config['repo']
+        ):
+            output_repos.append(repo_config)
+            continue
+        output.write('Updating {}...'.format(repo_config['repo']))
+        try:
+            new_repo_config = _update_repo(repo_config, runner, tags_only)
+        except RepositoryCannotBeUpdatedError as error:
+            output.write_line(error.args[0])
+            output_repos.append(repo_config)
+            retv = 1
+            continue
+
+        if new_repo_config['sha'] != repo_config['sha']:
+            changed = True
+            output.write_line('updating {} -> {}.'.format(
+                repo_config['sha'], new_repo_config['sha'],
+            ))
+            output_repos.append(new_repo_config)
+        else:
+            output.write_line('already up to date.')
+            output_repos.append(repo_config)
+
+    if changed:
+        output_config = input_config.copy()
+        output_config['repos'] = output_repos
+        _write_new_config_file(runner.config_file_path, output_config)
+
+    return retv
