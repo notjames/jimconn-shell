@@ -1,0 +1,45 @@
+#!/bin/bash
+# Written by Jim Conner
+# Usage: export $($HOME/bin/export_aws_creds [profile name])
+#
+# Purpose: quicky export AWS creds to environment variable
+# depending on profile.
+# **************************************************************
+
+PROFILE=$1
+PROFILE=${PROFILE:-default}
+AWS_CREDS_FILE="$HOME/.aws/credentials"
+
+read_creds()
+{
+  grep -A2 "$PROFILE" "$AWS_CREDS_FILE" | tail -n 2
+}
+
+usage()
+{
+  echo """
+  Usage: export \$($0)
+  """
+}
+
+[[ $1 =~ ^-h* ]] && \
+  {
+    usage && exit 0
+  }
+
+[[ ! -f $AWS_CREDS_FILE ]] && \
+  {
+    echo >&2 """
+    Unable to set AWS environment credentials from AWS credential file.
+    $AWS_CREDS_FILE does not exist.
+    """
+    exit 10
+  }
+
+while read -r l
+  do
+    suffix="$(echo "$l" | awk -F'=' '{print $2}' | tr -d ' ')"
+
+    [[ "$l" =~ _id     ]] && echo -n "AWS_ACCESS_KEY_ID=$suffix "
+    [[ "$l" =~ _secret ]] && echo    "AWS_SECRET_ACCESS_KEY=$suffix"
+  done  <<< "$(read_creds)"
