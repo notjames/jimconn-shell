@@ -4,8 +4,6 @@ require 'xml2json'
 
 xml = ARGV[0]
 
-#xml = ARGV.first or raise ArgumentError, "Please specify a XML file to parse."
-
 begin
   if xml == '-'
     xdata = ARGF.read.chomp
