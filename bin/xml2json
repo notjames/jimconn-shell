@@ -2,8 +2,18 @@
 
 require 'xml2json'
 
-file2parse = ARGV[0]
-file2parse = STDIN if file2parse.nil?
+xml = ARGV[0]
 
-puts XML2JSON.parse(File.read(file2parse).chomp)
+#xml = ARGV.first or raise ArgumentError, "Please specify a XML file to parse."
+
+begin
+  if xml == '-'
+    xdata = ARGF.read.chomp
+    puts XML2JSON.parse(xdata)
+  else
+    puts XML2JSON.parse(File.read(xml).chomp)
+  end
+rescue => e
+  $stderr.puts 'Unable to comply: %s' % [e.message]
+end
 
