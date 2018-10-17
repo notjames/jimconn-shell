@@ -14,7 +14,8 @@ vmrun()
 seausbid()
 {
   #vboxmanage list usbhost | grep -P 'UUID:|Product:|Manufact' | grep -B 1 -A 1 -i Seagate | grep UUID | awk -F ':' '{print $2}' | tr -d ' '
-  vboxmanage list usbhost | grep -B6 Sea | grep UUID | awk '{print $2}'
+  #vboxmanage list usbhost | grep -B6 Sea | grep 'UUID|' | awk '{print $2}'
+  vboxmanage list usbhost | grep -B6 -A2 Sea | grep -P 'UUID|SerialNumber' | awk '{print $2}' | paste -d ":" - -
 }
 
 seausb()
@@ -23,9 +24,11 @@ seausb()
   do
     echo "${cmd}ing"
     
-    for id in $(seausbid)
+    for idstr in $(seausbid)
     do
-      echo "id: $id"
+      IFS=':' read -r id sn <<< "$idstr"
+
+      echo "id: $id    sn: $sn"
       vboxmanage controlvm Ubuntu $cmd $id
     done
 
@@ -166,14 +169,14 @@ yt()
 
 alias ls='ls -G'
 
-[ -x /usr/bin/vim ] && alias vi="/usr/bin/vim"
-[ -x /usr/local/bin/vimcat ] && alias cat='/usr/local/bin/vimcat -n --colors=256'
+[ -x /usr/bin/vim ] && alias vi="/usr/bin/vim -p"
+#[ -x /usr/local/bin/vimcat ] && alias cat='/usr/local/bin/vimcat -n --colors=256'
+[ -x /usr/local/bin/bat ] && alias cat='/usr/local/bin/bat --style full --color=auto --theme=TwoDark'
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
 [ -x /usr/local/bin/ggrep ] && alias grep='/usr/local/bin/ggrep'
 [ -f ~/.acd_func.sh ] && source ~/.acd_func.sh
 
 alias grep='ggrep --color=auto'
-alias vi='vi -p'
 alias g="/usr/bin/git"
 
 alias terminix='(nohup ssh -YX vmlinux terminix >/dev/null 2>&1 &)'

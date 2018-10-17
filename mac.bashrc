@@ -11,3 +11,5 @@ export GOOD_BASHRC=yes
 source ~/.bash_aliases
 source ~/.git-prompt.sh
 
+
+[ -f ~/.fzf.bash ] && source ~/.fzf.bash
