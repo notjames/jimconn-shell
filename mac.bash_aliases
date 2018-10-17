@@ -11,13 +11,19 @@ vmrun()
   (nohup ssh -X vmlinux "$rcmd" >/dev/null 2>&1 &)
 }
 
+seausbid()
+{
+  #vboxmanage list usbhost | grep -P 'UUID:|Product:|Manufact' | grep -B 1 -A 1 -i Seagate | grep UUID | awk -F ':' '{print $2}' | tr -d ' '
+  vboxmanage list usbhost | grep -B6 Sea | grep UUID | awk '{print $2}'
+}
+
 seausb()
 {
   for cmd in usbdetach usbattach
   do
     echo "${cmd}ing"
     
-    for id in $(vboxmanage list usbhost | grep -P 'UUID:|Product:|Manufact' | grep -B 1 -A 1 -i Seagate | grep UUID | awk -F ':' '{print $2}' | tr -d ' ')
+    for id in $(seausbid)
     do
       echo "id: $id"
       vboxmanage controlvm Ubuntu $cmd $id
@@ -150,7 +156,7 @@ yt()
     
   if cd "$d"
   then
-    youtube-dl --video-format mp4 --add-metadata -ct $*
+    youtube-dl -f mp4 --add-metadata -ct $*
     fix_fsp && cd -
   else
     echo >&2 "unable to chdir $d"
