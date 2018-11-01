@@ -112,9 +112,7 @@ esac
 # ~/.bash_aliases, instead of adding them here directly.
 # See /usr/share/doc/bash-doc/examples in the bash-doc package.
 
-if [ -f ~/.bash_aliases ]; then
-    . ~/.bash_aliases
-fi
+[[ -f ~/.bash_aliases ]] && . ~/.bash_aliases
 
 # enable programmable completion features (you don't need to enable
 # this, if it's already enabled in /etc/bash.bashrc and /etc/profile
@@ -132,22 +130,28 @@ then
   source /etc/profile.d/vte.sh
 fi # Ubuntu Budgie END
 
-## installed_skopos
-BASH_SCRIPTS="$HOME"/.bash
-export BASH_SCRIPTS
+### installed_skopos
+#BASH_SCRIPTS="$HOME"/.bash
+#export BASH_SCRIPTS
+#
+#if [[ -e "$BASH_SCRIPTS"/skopos/init_skopos ]]; then
+#  source "$BASH_SCRIPTS"/skopos/init_skopos
+#
+#  if [[ $(echo "$PATH" | grep -c "$HOME"/bin) == 0 ]]
+#  then
+#    PATH="${PATH:+$PATH:}$HOME/bin:$HOME/.local/bin"
+#    export PATH
+#  fi
+#else
+#  echo >&2 "No skopos for you... :("
+#fi
+### end installed_skopos
 
-if [[ -e "$BASH_SCRIPTS"/skopos/init_skopos ]]; then
-  source "$BASH_SCRIPTS"/skopos/init_skopos
+#export GITAWAREPROMPT="$HOME/.bash/git-aware-prompt" PATH GOPATH HISTTIMEFORMAT EDITOR
+export PATH GOPATH HISTTIMEFORMAT EDITOR
+#source "${GITAWAREPROMPT}/main.sh"
 
-  if [[ $(echo "$PATH" | grep -c "$HOME"/bin) == 0 ]]
-  then
-    PATH="${PATH:+$PATH:}$HOME/bin:$HOME/.local/bin"
-    export PATH
-  fi
-else
-  echo >&2 "No skopos for you... :("
-fi
-## end installed_skopos
+[ -f ~/.fzf.bash ] && source ~/.fzf.bash
+source $HOME/.fonts/*.sh
+source /home/jimconn/.oh-my-git/prompt.sh
 
-export GITAWAREPROMPT="$HOME/.bash/git-aware-prompt" PATH GOPATH HISTTIMEFORMAT EDITOR
-source "${GITAWAREPROMPT}/main.sh"

@@ -95,7 +95,7 @@ if [ -x /usr/bin/dircolors ]; then
     #alias dir='dir --color=auto'
     #alias vdir='vdir --color=auto'
 
-    alias grep='grep -n --color=auto'
+    alias grep='grep --color=auto'
     alias fgrep='fgrep --color=auto'
     alias egrep='egrep --color=auto'
 fi
@@ -119,12 +119,18 @@ alias grm='g co master && g fetch --all && g reset --hard upstream/master && g r
 
 #eval "$(rbenv init -)"
 
-alias supclusterupd='cluster_sshconfig_upd --region us-east-1 --cluster-name superior --id-file $HOME/.ssh/cyklops-superior --ssh-config $HOME/.kraken-superior/cyklops-superior/ssh_config'
-alias onclusterupd='cluster_sshconfig_upd --region us-east-1 --cluster-name onondaga --id-file $HOME/.ssh/onondaga --ssh-config $HOME/.kraken-onondaga/onondaga/ssh_config'
-alias jujuclusterupd='cluster_sshconfig_upd --region us-west-2 --cluster-name cmc-poc --id-file ~/.ssh/juju_id_rsa --cluster-type juju --ssh-config $KRAKEN/juju/ssh_config'
+#alias supclusterupd='cluster_sshconfig_upd --region us-east-1 --cluster-name superior --id-file $HOME/.ssh/cyklops-superior --ssh-config $HOME/.kraken-superior/cyklops-superior/ssh_config'
+#alias onclusterupd='cluster_sshconfig_upd --region us-east-1 --cluster-name onondaga --id-file $HOME/.ssh/onondaga --ssh-config $HOME/.kraken-onondaga/onondaga/ssh_config'
+#alias jujuclusterupd='cluster_sshconfig_upd --region us-west-2 --cluster-name cmc-poc --id-file ~/.ssh/juju_id_rsa --cluster-type juju --ssh-config $KRAKEN/juju/ssh_config'
 alias hd='helm del --purge'
+
 # remove comments in front of these if skopos is ever decomissioned.
-#alias k='kubectl'
+alias k='kubectl'
+alias kg='kubectl get -o wide'
+alias kga='kubectl get -o wide --all-namespaces'
+alias kgj='kubectl get -o json'
+alias kgdesc='kubectl describe'
+
 #alias k2='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig'
 #alias k2env='printenv | grep -P '\''KRAKEN|K2|KUBE|HELM'\'''
 #alias k2g='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig get -o wide'
@@ -132,10 +138,11 @@ alias hd='helm del --purge'
 #alias kg='kubectl get -o wide'
 #alias kssh='ssh -F /home/jimconn/.kraken/cyklops-superior/ssh_config '
 #alias k2exec='kubectl -n ${NAMESPACE:?"Please set NAMESPACE"} exec -it ${PODNAME:?"Please set PODNAME"} env COLUMNS=$COLUMNS LINES=$LINES TERM=$TERM bash'
-alias kl="docker run -it --rm -v $HOME/projects/src/tahoe.cluster.cnct.io:/tahoe quay.io/samsung_cnct/kraken-lib /bin/bash"
-
+#alias kl="docker run -it --rm -v $HOME/projects/src/tahoe.cluster.cnct.io:/tahoe quay.io/samsung_cnct/kraken-lib /bin/bash"
 
 alias preview="fzf --preview 'bat --color \"always\" {}'"
 alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
+[ -x $(which bat) ] && alias less="$(which bat) --color=auto --theme=TwoDark"
+
 # add support for ctrl+o to open selected file in VS Code
 export FZF_DEFAULT_OPTS="--bind='ctrl-o:execute(code {})+abort'"
