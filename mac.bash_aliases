@@ -169,7 +169,8 @@ yt()
 
 alias ls='ls -G'
 
-[ -x /usr/bin/vim ] && alias vi="/usr/bin/vim -p"
+[ -x $(which vim) ] && alias vi='vim -p'
+[ -x $(which nvim) ] && alias vi="nvim -p"
 #[ -x /usr/local/bin/vimcat ] && alias cat='/usr/local/bin/vimcat -n --colors=256'
 [ -x /usr/local/bin/bat ] && alias cat='/usr/local/bin/bat --style full --color=auto --theme=TwoDark'
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash
@@ -179,5 +180,10 @@ alias ls='ls -G'
 alias grep='ggrep --color=auto'
 alias g="/usr/bin/git"
 
-alias terminix='(nohup ssh -YX vmlinux terminix >/dev/null 2>&1 &)'
+#alias terminix='(nohup ssh -YX vmlinux terminix >/dev/null 2>&1 &)'
 alias tilix='(nohup ssh -YX vmlinux tilix >/dev/null 2>&1 &)'
+alias k='kubectl'
+alias kg='kubectl get -o wide'
+alias kga='kubectl get -o wide --all-namespaces'
+alias kgj='kubectl get -o json'
+alias kgdesc='kubectl describe'
