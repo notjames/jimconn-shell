@@ -1,0 +1,12 @@
+#!/bin/bash
+
+cd ~ && rm -rf .kube .minikube && \
+  cp -avp /media/sf_jimconn/.kube . && \
+  rsync -avz --exclude '*.rawdisk' --exclude '*.iso' /media/sf_jimconn/.minikube . && \
+  cd ~/.minikube && kube_fixperms.sh && \
+  cd ~/.minikube/machines/minikube && \
+  sed -i -r 's/Users/home/' config.json && \
+  cd ~/.kube/ && kube_fixperms.sh && \
+  sed -i -r 's/Users/home/' config
+#cd ~ && rm -rf .kube .minikube 2>/dev/null && cp -avp /media/sf_jimconn/.kube .
+#cd ~/.kube/ && kube_fixperms.sh && sed -i -r 's/Users/home/' config

@@ -129,7 +129,7 @@ alias k='kubectl'
 alias kg='kubectl get -o wide'
 alias kga='kubectl get -o wide --all-namespaces'
 alias kgj='kubectl get -o json'
-alias kgdesc='kubectl describe'
+alias kd='kubectl describe'
 
 #alias k2='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig'
 #alias k2env='printenv | grep -P '\''KRAKEN|K2|KUBE|HELM'\'''
