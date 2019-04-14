@@ -140,9 +140,14 @@ alias kd='kubectl describe'
 #alias k2exec='kubectl -n ${NAMESPACE:?"Please set NAMESPACE"} exec -it ${PODNAME:?"Please set PODNAME"} env COLUMNS=$COLUMNS LINES=$LINES TERM=$TERM bash'
 #alias kl="docker run -it --rm -v $HOME/projects/src/tahoe.cluster.cnct.io:/tahoe quay.io/samsung_cnct/kraken-lib /bin/bash"
 
+alias whatsmyip='curl -sL http://api.myip.com | jq -Mr .ip'
 alias preview="fzf --preview 'bat --color \"always\" {}'"
 alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
-[ -x $(which bat) ] && alias less="$(which bat) --color=auto --theme=TwoDark"
+[ -x $(which bat) ] && \
+  {
+    alias less="$(which bat) --color=auto --theme=TwoDark"
+    alias cat="$(which bat) --color=auto --theme=TwoDark"
+  }
 
 # add support for ctrl+o to open selected file in VS Code
 export FZF_DEFAULT_OPTS="--bind='ctrl-o:execute(code {})+abort'"
