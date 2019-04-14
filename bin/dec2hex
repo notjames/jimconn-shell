@@ -17,21 +17,26 @@ def divide(numerator)
 end
 
 def main(value)
+  if value =~ /[a-z]|\s|[:\u00C0-\u00FF]/i
+    $stderr.puts "The input supplied is an invalid value, not a number: %s" % [value.inspect]
+    return false
+  end
+
   remainders = []
   result     = []
+  value      = value.to_i
 
   # divide value by 16
   # if answer can still be divided by 16
   # continue to divide answer by 16 until not possible
   # take remainders of each operation from end to beginning
-  # convert each to HEX value if 10-15, cat together
-  # and that's the answer.
+  # convert each to HEX value if 10-15, join for answer
 
-  if value.to_i / 16 == 0
+  if value / 16 == 0
     next_num, remainder = divide(value)
     remainders << remainder
   else
-    while value.to_i / 16 != 0 do
+    while value / 16 != 0 do
       next_num, remainder = divide(value)
       remainders << remainder
 
@@ -41,11 +46,6 @@ def main(value)
     remainders << value
   end
 
-  # take last two elements, convert to HEX if possible and cat
-  # then do the same in remainders in reverse:
-  # given: [12,5,2,4,11] => 4B25C
-  #          5 4 3 1  2    (^^^^^ positions)
-
   remainders.reverse.each do \
   |v|
     if HEX_HASH.has_key? v.to_i
@@ -53,10 +53,6 @@ def main(value)
     end
     result << v
   end
-
-#  tmp       = result.first
-#  result[0] = result[1]
-#  result[1] = tmp
 
   puts result.join('').to_s
 end
