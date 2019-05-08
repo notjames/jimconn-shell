@@ -1,8 +1,10 @@
 #!/bin/bash
 
+which=$(command -v which)
+
 cnct_clone()
 {
-  local ghub repo repo_name client_repo upstream_repo
+  local ghub repo_name client_repo upstream_repo
 
   ghub="https://github.com/"
   repo_name="${1:?Must provide repo name}"
@@ -79,6 +81,47 @@ yt()
   fi
 }
 
+maas_machine_id()
+{
+  local id
+  id=$1
+
+  [[ -z "$id" ]] && \
+    {
+      echo >&2 "Please provide a machine name to seek."
+      return 1
+    }
+
+  maas jimconn machines read | \
+    jq -Mr --arg name "$id" '
+      .[] |
+        select(.hostname == $name) |
+          .boot_interface.system_id'
+}
+
+function cwb
+{
+  git branch | grep -P '^\*' | awk -F '*' '{print $2}' | tr -d ' '
+}
+
+function sm
+{
+  CWB="$(cwb)"
+
+  git checkout master && \
+  git fetch upstream && \
+  git reset --hard upstream/master && \
+  git pull && git push
+
+  [[ "$CWB" != "master" ]] && \
+    {
+      git checkout "$CWB" && \
+      git pull --rebase origin master && \
+      git push
+    }
+}
+
+alias mmid=maas_machine_id
 # some more ls aliases
 alias ll='ls -alF'
 alias la='ls -A'
@@ -100,7 +143,7 @@ if [ -x /usr/bin/dircolors ]; then
     alias egrep='egrep --color=auto'
 fi
 
-[ -x "$(which git)" ] && alias g='git'
+[ -x "$($which git)" ] && alias g='git'
 
 alias tmux='tmux -2'
 
@@ -143,10 +186,10 @@ alias kd='kubectl describe'
 alias whatsmyip='curl -sL http://api.myip.com | jq -Mr .ip'
 alias preview="fzf --preview 'bat --color \"always\" {}'"
 alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
-[ -x $(which bat) ] && \
+[ -x "$($which bat)" ] && \
   {
-    alias less="$(which bat) --color=auto --theme=TwoDark"
-    alias cat="$(which bat) --color=auto --theme=TwoDark"
+    alias less="\$($which bat) --color=auto --theme=TwoDark"
+    alias cat="\$($which bat) --color=auto --theme=TwoDark"
   }
 
 # add support for ctrl+o to open selected file in VS Code
