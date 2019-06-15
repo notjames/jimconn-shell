@@ -3,30 +3,6 @@
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
 
-function cwb
-{
-  git branch | grep -P '^\*' | grep -Po '\w+'
-}
-
-function sm
-{
-  CWB=$(cwb)
-
-  if [[ -n "$CWB" ]]
-  then
-    git checkout master && \
-    git fetch upstream && \
-    git reset --hard upstream/master && \
-    git checkout "$CWB"
-    git push
-
-    if [ "$CWB" != "master" ]; then git merge master;fi
-  else
-    echo "No working branch here."
-  fi
-}
-
-
 # If not running interactively, don't do anything
 case $- in
     *i*) ;;
@@ -125,11 +101,6 @@ if ! shopt -oq posix; then
   fi
 fi
 
-if [[ $TERMINIX_ID ]]
-then
-  source /etc/profile.d/vte.sh
-fi # Ubuntu Budgie END
-
 ### installed_skopos
 #BASH_SCRIPTS="$HOME"/.bash
 #export BASH_SCRIPTS
@@ -151,7 +122,13 @@ fi # Ubuntu Budgie END
 export PATH GOPATH HISTTIMEFORMAT EDITOR
 #source "${GITAWAREPROMPT}/main.sh"
 
-[ -f ~/.fzf.bash ] && source ~/.fzf.bash
-source $HOME/.fonts/*.sh
-source /home/jimconn/.oh-my-git/prompt.sh
+if [ $TILIX_ID ] || [ $VTE_VERSION ]; then
+  source /etc/profile.d/vte.sh
+fi
 
+[ -f $HOME/.fzf.bash ] && source $HOME/.fzf.bash
+
+source $HOME/.oh-my-git/prompt.sh
+source $HOME/.fonts/*.sh
+
+[ -f ~/.fzf.bash ] && source ~/.fzf.bash
