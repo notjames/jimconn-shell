@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+
+HEX_HASH = \
+  {
+    :A => 10,
+    :B => 11,
+    :C => 12,
+    :D => 13,
+    :E => 14,
+    :F => 15,
+  }
+
+def main(value)
+  each_int = []
+  total    = 0
+
+  if value !~ /\d/ or value =~ /[g-z]/i
+    $stderr.puts 'The value supplied is not a valid hex number. ' + value.inspect
+    return false
+  end
+
+  # from right to left
+  # pos[0] = val(16^0) == 0 (always)
+  # pos[n] = val(16^(length(value)))
+  # final: each +=pos[n]
+
+  value.split(//).reverse.each_with_index do \
+  |v,i|
+    calculated = 0
+
+    if HEX_HASH.has_key? v.upcase.to_sym
+      calculated = HEX_HASH[v.upcase.to_sym] * (16**i)
+    else
+      calculated = v.to_i * (16**i)
+    end
+
+    each_int << calculated
+  end
+
+  each_int.each do \
+  |i|
+    total += i.to_i
+  end
+
+  puts total
+end
+
+main ARGV[0]
