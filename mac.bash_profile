@@ -1,5 +1,3 @@
-source $HOME/.bashrc
-
 txtblk='\e[0;30m' # Black - Regular
 txtred='\e[0;31m' # Red
 txtgrn='\e[0;32m' # Green
@@ -35,11 +33,14 @@ bakwht='\e[47m'   # White
 txtrst='\e[0m'    # Text Reset
 
 GOPATH=$HOME/go:$HOME/projects
-PATH=$PATH:$HOME/go/bin:$HOME/Library/Python/2.7/bin:$HOME/bin
+PATH=$PATH:$HOME/go/bin:$HOME/Library/Python/2.7/bin:$HOME/bin:/usr/local/sbin
 
-HOMEBREW_GITHUB_API_TOKEN=bd03f4ee510f6237977b46ac3e66b4fd8409cec2
+#HOMEBREW_GITHUB_API_TOKEN=0c6a635c6a09ce1a11946798ee13e631cee9ec
 
 #PS1='\h:\W \u\$ '
 PS1="\[$txtgrn\]\t\[$txtred\]-\[$txtblu\]\u\[$txtylw\]\[$txtylw\]\w\[\033[m\]\[$txtgrn\]\$(__git_ps1)\[$txtrst\]\$ "
 
-export PATH PS1 GOPATH HOMEBREW_GITHUB_API_TOKEN
+#export PATH PS1 GOPATH HOMEBREW_GITHUB_API_TOKEN
+export PATH PS1 GOPATH
+
+source $HOME/.bashrc

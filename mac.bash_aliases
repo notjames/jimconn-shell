@@ -8,14 +8,14 @@ vmrun()
       return 1
     }
 
-  (nohup ssh -X vmlinux "$rcmd" >/dev/null 2>&1 &)
+  (nohup ssh -YX vmlinux "$rcmd" >/dev/null 2>&1 &)
 }
 
 seausbid()
 {
   #vboxmanage list usbhost | grep -P 'UUID:|Product:|Manufact' | grep -B 1 -A 1 -i Seagate | grep UUID | awk -F ':' '{print $2}' | tr -d ' '
   #vboxmanage list usbhost | grep -B6 Sea | grep 'UUID|' | awk '{print $2}'
-  vboxmanage list usbhost | grep -B6 -A2 Sea | grep -P 'UUID|SerialNumber' | awk '{print $2}' | paste -d ":" - -
+  vboxmanage list usbhost | /usr/local/bin/ggrep -B6 -A2 Sea | /usr/local/bin/ggrep -P 'UUID|SerialNumber' | awk '{print $2}' | paste -d ":" - -
 }
 
 seausb()
@@ -29,7 +29,7 @@ seausb()
       IFS=':' read -r id sn <<< "$idstr"
 
       echo "id: $id    sn: $sn"
-      vboxmanage controlvm Ubuntu $cmd $id
+      /usr/local/bin/vboxmanage controlvm Ubuntu $cmd $id
     done
 
     read -p "Press any key to re-attach drives..."
@@ -98,7 +98,7 @@ sm()
 
 Lapps()
 {
-  (nohup ssh -YX vmlinux "(tilix &) && (hexchat &) && (gitg &)" >/dev/null 2>&1 &)
+  (nohup ssh -YX vmlinux "(tilix &) && (quassel &) && (gitg &)" >/dev/null 2>&1 &)
 }
 
 fix_fsp()                                                                                                                                                                                     
@@ -109,7 +109,7 @@ fix_fsp()
     basename=${f%.*}
     suffix=${f#*.}
     new_f=$(echo "$f" | tr ' ' '_' | \
-            sed -r \
+            gsed -r \
                  -e "s/[,']|[()]|[[]]//g"       \
                  -e "s/\&#([a-zA-Z0-9]+;|-)//g" \
                  -e 's/[^a-zA-Z0-9]//'          \
@@ -135,7 +135,7 @@ yts()
     
   if cd "$d"
   then
-    youtube-dl -kx --add-metadata --audio-format m4a -c -o "%(title)s-%(id)s.%(ext)s" $*
+    youtube-dl -x --add-metadata --audio-format m4a -c -o "%(title)s-%(id)s.%(ext)s" $*
     fix_fsp && cd -
   else
     echo >&2 "unable to chdir $d"
