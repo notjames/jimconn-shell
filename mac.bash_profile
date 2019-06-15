@@ -34,6 +34,11 @@ txtrst='\e[0m'    # Text Reset
 
 GOPATH=$HOME/go:$HOME/projects
 PATH=$PATH:$HOME/go/bin:$HOME/Library/Python/2.7/bin:$HOME/bin:/usr/local/sbin
+[[ -x $(which nvim) ]] && \
+  {
+    EDITOR=/usr/local/bin/nvim
+    export EDITOR
+  }
 
 #HOMEBREW_GITHUB_API_TOKEN=0c6a635c6a09ce1a11946798ee13e631cee9ec
 
