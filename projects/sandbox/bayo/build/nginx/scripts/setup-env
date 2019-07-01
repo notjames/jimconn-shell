@@ -6,7 +6,8 @@ _DIR=${_DIR:-/var/tmp}
 TMPL_PATH="$_DIR"/templates
 PATH_OF_TRUTH="$_DIR"
 
-echo "PATH OF TRUTH is: $PATH_OF_TRUTH"
+echo "((( This may take a minute... )))"
+
 rm /etc/nginx/conf.d/default.conf
 
 while read -r srvname; do

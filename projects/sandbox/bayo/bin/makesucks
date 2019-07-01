@@ -3,4 +3,4 @@
 docker run -it \
     -e WS_ADDRESS=$(docker inspect nginx -f '{{.NetworkSettings.Networks.bridge.IPAddress}}') \
     -v ${PWD}:/opt -w /opt ruby:2.5-slim \
-    /bin/bash -c "/opt/bin/append-etc-hosts && printenv && /opt/bin/tw-chal /opt/docs/servers.txt"
+    /bin/bash -c "/opt/bin/append-etc-hosts && /opt/bin/tw-chal /opt/docs/servers.txt"
