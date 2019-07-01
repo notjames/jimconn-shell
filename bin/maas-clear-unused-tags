@@ -1,0 +1,36 @@
+#!/bin/bash
+
+IGNORE=(nfs-server-1 warranty-replacement-of-ssd
+        operator_master sbrain-docker-registry
+        cms_master cms_worker)
+PROFILE=${PROFILE:-jimconn}
+ALL_TAGS_JSON=/var/tmp/tags.json
+
+tags_cmd()
+{
+  maas "$PROFILE" tag nodes "$tag" | \
+  jq -Mr '
+  [ .[] |
+    .hostname ] as $nodes |
+    $nodes |
+    length as $count |
+    @sh "\($nodes)^\($count)"'
+}
+
+maas "$PROFILE" tags read | \
+  jq -Mr '.[].name' | \
+  sort | uniq > "$ALL_TAGS_JSON"
+
+while read -r tag; do
+  if [[ $(echo "${IGNORE[@]}" | grep -Pc '\b'"$tag") -gt 0 ]]; then
+    echo "*** Skipping ignored: $tag"
+    continue
+  fi
+
+  IFS='^' read -r nodes count <<< "$(tags_cmd)"
+  nodes="${nodes:-"empty"}"
+  nodes="$(echo "$nodes" | tr -d "'")"
+
+  printf "deleting tag: %-30s nodes: %-25s -> %4s\\n" "$tag" "$nodes" "$count"
+  maas "$PROFILE" tag delete "$tag"
+done < "$ALL_TAGS_JSON"
