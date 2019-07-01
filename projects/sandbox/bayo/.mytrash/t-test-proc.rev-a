@@ -1,0 +1,50 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'awesome_print'
+
+# monkey patch Numeric to easily
+# plumb-in percentage
+class Numeric
+  def percent_of(n)
+    self.to_f / n.to_f * 100.0
+  end
+end
+
+# slurp the input file
+IN  = JSON.parse(ARGF.read.chomp)
+
+# initialize output
+OUT = {}
+
+# process input
+IN.each \
+{|obj|
+  app = obj['Application']
+  ver = obj['Version']
+  rqc = obj['Request_Count']
+  scc = obj['Success_Count']
+
+  OUT[app]                   = {}  unless OUT.has_key?(app)
+  OUT[app][ver]              = {}  unless OUT[app].has_key?(ver)
+  OUT[app][ver]['t_request'] = 0   unless OUT[app][ver].has_key?('t_request')
+  OUT[app][ver]['t_success'] = 0   unless OUT[app][ver].has_key?('t_success')
+  OUT[app][ver]['p_success'] = 0.0 unless OUT[app][ver].has_key?('p_success')
+
+  OUT[app][ver]['t_request'] += rqc
+  OUT[app][ver]['t_success'] += scc
+}
+
+# process output
+OUT.each_pair \
+{|app, obj|
+  obj.each_pair \
+  {|ver, obj|
+    t_suc = obj['t_success']
+    t_req = obj['t_request']
+
+    obj['p_success'] = ('%2.2f' % t_suc.percent_of(t_req)).to_f
+
+    ['t_success', 't_request'].map{|k| obj.delete(k)}
+  }
+}
