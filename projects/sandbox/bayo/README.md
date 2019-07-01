@@ -1,14 +1,15 @@
 # What is this
 The purpose of this was to create a script that could pull, aggregate, and output
-status information from 1K webservers. There were two challenges I faced in this
-fun project.
+status information from 1K webservers. The aggregated information would need to
+be output in human readable form as well as in a file that was machine readable.
+There were two challenges I faced in this fun project.
 
-  * Where to get 1K web servers
-  * The script itself needed to be written
+  * Where to get 1K web servers from which to pull status information and
+  * The script itself needed to be written as well as supporting files and scripts
 
 # How I decided to solve the problem
-I obviously wasn't going to instantiate 1K AWS EC2 instances due to cost and
-proper server management as dictated by good devops practice. I decided that
+I obviously wasn't going to instantiate 1K cloud provider instances due to cost and
+proper server management dictated by good devops practice. I decided that
 the most important part of this project wasn't the infrastructure but the
 way I aggregated the status information. After all, the purpose of this was
 to work on my coding skills. So I decided to use an NginX docker container
@@ -19,7 +20,6 @@ In order to run this project, one must have the following installed:
 
   * git
   * docker-ce ~ 18.09.7
-  * docker-compose ~ 1.24.1
 
 # How to get this repo
 I placed this in a git repo projects directory that I use for other projects.
@@ -32,9 +32,9 @@ $ cd jimconn-shell/projects/sandbox/bayo
 ```
 
 # Build and run
-There is no real "building" per se, at least not like source compilation. There
-is some setup for containers, however. A `Makefile` has been provided to do the
-heavy lifting. Run the following once the repo is pulled:
+There is no source "building". There is some setup for containers, however. A
+`Makefile` has been provided to do the heavy lifting. Run the following once
+the repo is pulled:
 
 ```sh
 $ make
@@ -49,3 +49,22 @@ After the project is done running, one should clean up
 ```sh
 $ make clean
 ```
+
+# Run outside of docker?
+Totally doable provided you have 1K servers with resolvable names correlating
+to the list of servers provided in <path>/docs/servers.txt. If you have those
+things then one need only run:
+
+```sh
+$ bin/tw-chal ../docs/servers.txt
+```
+
+# Gotchas
+If you run this project in container(s) first and then attempt to run `tw-chal`
+autonomously then you will get an error thrown that `tw-chal` cannot save the
+file named `success-rates.json`. That is because `docker` still runs by default
+all things root so any files persisted by a running container will be owned by
+root. When not running `tw-chal` in a container, you're running as a non-priv-
+ileged user, more than likely. So, the still-existing file `success-rates.json`
+cannot be clobbered by you. You'll need to `sudo rm success-rates.json` first,
+and then run the above-mentioned command to fix thep problem.
