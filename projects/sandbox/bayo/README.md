@@ -23,18 +23,17 @@ In order to run this project as intended (within containers), one must have
 the following binaries installed:
 
   * git
-  * docker-ce ~ 18.09.7
+  * docker-ce ~ 18.09.x
 
 ## Linux or Mac (Darwin)?
 Technically, since this whole project works within containers, it should work
-on any OS platform. That said, however, I've only tested it on Linux (Ubuntu
-18.10). Now, if you run it independently, YMMV. It *should* work on either
-Linux or MacOS.
+on any OS platform. I have successfully, though manually, tested it on Mac and
+Linux platforms, though the Linux platform was a single distro, Ubuntu.
 
 ## How to get this repo
 I placed this in a git repo projects directory that I use for other projects.
-So one will need to, unfortunately, clone the entire repo and then isolate the
-repo project directory named "bayo".
+So one will need to clone the entire repo and then isolate the repo project
+directory named "bayo".
 
 ```sh
 $ git clone https://github.com/notjames/jimconn-shell
@@ -53,15 +52,8 @@ $ make
 The `make` command will set up the containers, docker network, and bring up the
 containers necessary to run the `tw-chal` script.
 
-## Once all is done
-After the project is done running, one should clean up
-
-```sh
-$ make clean
-```
-
 ## Run outside of docker?
-Totally doable provided you have 1K servers with resolvable names correlating
+Totally doable provided you have 1K web servers with resolvable names correlating
 to the list of servers provided in `<path>/docs/servers.txt` and...
 
 ### Stand-alone runtime Pre-requisite binaries:
