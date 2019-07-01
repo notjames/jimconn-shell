@@ -13,13 +13,23 @@ proper server management dictated by good devops practice. I decided that
 the most important part of this project wasn't the infrastructure but the
 way I aggregated the status information. After all, the purpose of this was
 to work on my coding skills. So I decided to use an NginX docker container
-using host-based virtual machines for the infrastructure.
+using host-based virtual machines for the infrastructure and in my container
+from where the script is running, simply add the 1K of servers to `/etc/hosts`
+resolving to the IP address of the web server container. This concept worked
+like a charm.
 
 # Pre-requisites
-In order to run this project, one must have the following installed:
+In order to run this project as intended (within containers), one must have
+the following binaries installed:
 
   * git
   * docker-ce ~ 18.09.7
+
+# Linux or Mac (Darwin)?
+Technically, since this whole project works within containers, it should work
+on any OS platform. That said, however, I've only tested it on Linux (Ubuntu
+18.10). Now, if you run it independently, YMMV. It *should* work on either
+Linux or MacOS.
 
 # How to get this repo
 I placed this in a git repo projects directory that I use for other projects.
@@ -72,4 +82,4 @@ all things root so any files persisted by a running container will be owned by
 root. When not running `tw-chal` in a container, you're running as a non-priv-
 ileged user, more than likely. So, the still-existing file `success-rates.json`
 cannot be clobbered by you. You'll need to `sudo rm success-rates.json` first,
-and then run the above-mentioned command to fix thep problem.
+and then run the above-mentioned command to fix the problem.
