@@ -1,14 +1,12 @@
 #!/bin/bash
 
-# This is meant to be run within a container!
-#set -ex
-apt update && apt install -y jq bc
-
 # shellcheck disable=SC2046
-_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
-TMPL_PATH="$_DIR"/nginx/templates
-PATH_OF_TRUTH="$_DIR"/../docs/
+_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" || true)
+_DIR=${_DIR:-/var/tmp}
+TMPL_PATH="$_DIR"/templates
+PATH_OF_TRUTH="$_DIR"
 
+echo "PATH OF TRUTH is: $PATH_OF_TRUTH"
 rm /etc/nginx/conf.d/default.conf
 
 while read -r srvname; do
@@ -26,6 +24,3 @@ while read -r srvname; do
       envsubst '$SERVER_NAME' > /"$SERVER_NAME"/index.html
 
 done < "$PATH_OF_TRUTH"/servers.txt
-
-#/usr/sbin/nginx -t && \
-#/usr/sbin/nginx -g "daemon off;"

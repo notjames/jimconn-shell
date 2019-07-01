@@ -13,7 +13,14 @@ end
 
 def get_data()
   json_in = []
-  servers = ARGF.read.chomp.split(/\n/)
+
+  begin
+    srvfile = ARGV.first
+    servers = File.read(srvfile).chomp.split(/\n/)
+  rescue
+    $stderr.puts "Server file not supplied as first argument. Trying STDIN"
+    servers = ARGF.read.chomp.split(/\n/)
+  end
 
   servers.each \
   {|srv|
@@ -84,6 +91,7 @@ end
 
 def machine_output(file_out, out)
   begin
+    # intentionally truncate
     file = File.open(file_out, 'w')
     file.write(JSON.dump(out))
   rescue IOError => e

@@ -1,23 +1,13 @@
-all: setup-docker-network run
+all: setup-docker run
 .PHONY: all
 
-NETNAME = "dockerNetwork"
-
-setup-docker-network:
-  # names containers to be used in docker network creation
-	@docker run --name twitter-challenge twitter-challenge:test ls > /dev/null
-	@docker run --name nginx nginx:stable ls > /dev/null
-
-  # create docker network
-	@docker network create --driver bridge --subnet 172.16.0.0/16 --gateway 172.16.0.1 ${NETNAME}
-	@docker network connect --ip 172.16.0.100 ${NETNAME} twitter-challenge
-	@docker network connect --ip 172.16.0.200 ${NETNAME} nginx
+setup-docker:
+	@docker build -t nginx:jimconn build/nginx
 
 run:
-	@docker-compose up --force-recreate -d
-
+	@docker rm nginx > /dev/null 2>&1 || true
+	@docker run -dv ${PWD}:/opt --name nginx nginx:jimconn
+	@bin/makesucks
 clean:
-	@docker-compose down
-	@docker network rm dockerNetwork 2>/dev/null || true
-	@docker rm nginx twitter-challenge 2>/dev/null || true
-	@docker rm $(docker inspect twitter-challenge --format='{{.Config.Hostname}}' 2>/dev/null) 2>/dev/null || true
+	@docker stop nginx > /dev/null 2>&1
+	@docker rm nginx > /dev/null 2>&1
