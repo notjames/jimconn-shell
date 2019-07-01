@@ -1,0 +1,81 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'awesome_print'
+require 'net/http'
+
+# monkey patch Numeric to easily
+# plumb-in percentage
+class Numeric
+  def percent_of(n)
+    self.to_f / n.to_f * 100.0
+  end
+end
+
+json_in  = []
+file_out = 'success_rates.json'
+
+# initialize output
+out = {}
+servers = ARGF.read.chomp.split(/\n/)
+
+servers.each \
+{|srv|
+  status = JSON.load(Net::HTTP.get(srv, '/status'))
+  json_in << status
+}
+
+# process input
+json_in.each \
+{|obj|
+  app = obj['Application']
+  ver = obj['Version']
+  rqc = obj['Request_Count']
+  scc = obj['Success_Count']
+
+  out[app]                   = {}  unless out.has_key?(app)
+  out[app][ver]              = {}  unless out[app].has_key?(ver)
+  out[app][ver]['t_request'] = 0   unless out[app][ver].has_key?('t_request')
+  out[app][ver]['t_success'] = 0   unless out[app][ver].has_key?('t_success')
+  out[app][ver]['p_success'] = 0.0 unless out[app][ver].has_key?('p_success')
+
+  out[app][ver]['t_request'] += rqc
+  out[app][ver]['t_success'] += scc
+}
+
+# process output
+out.each_pair \
+{|app, obj|
+  obj.each_pair \
+  {|ver, obj|
+    t_suc = obj['t_success']
+    t_req = obj['t_request']
+
+    obj['p_success'] = ('%2.2f' % t_suc.percent_of(t_req)).to_f
+
+    ['t_success', 't_request'].map{|k| obj.delete(k)}
+  }
+}
+
+begin
+  file = File.open(file_out, 'w')
+  file.write(JSON.dump(out))
+rescue IOError => e
+  #some error occur, dir not writable etc.
+  $stderr.puts 'Unable to write file: %s' % [e]
+ensure
+  file.close unless file.nil?
+end
+
+puts ' App   Version   Success Rate'
+puts '-' * 29
+
+out.sort{|a,b| a <=>b }.each \
+{|app, obj|
+  puts '%s' % [app]
+
+  obj.sort{|a,b| a <=> b}.each \
+  {|ver, obj|
+    puts "\t%5s: %10s%%" % [ver, obj['p_success']]
+  }
+}

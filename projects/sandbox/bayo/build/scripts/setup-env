@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# This is meant to be run within a container!
+#set -ex
+apt update && apt install -y jq bc
+
+# shellcheck disable=SC2046
+_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+TMPL_PATH="$_DIR"/nginx/templates
+PATH_OF_TRUTH="$_DIR"/../docs/
+
+rm /etc/nginx/conf.d/default.conf
+
+while read -r srvname; do
+  export SERVER_NAME=$srvname
+  server_num=$(echo "$SERVER_NAME" | awk -F '-' '{print $2}' | bc)
+
+  mkdir -p /"$SERVER_NAME" && \
+    jq -Mr --arg s "$((server_num - 1))" '.[$s | tonumber]' \
+      "$PATH_OF_TRUTH"/responses.txt > /"$SERVER_NAME"/status
+
+  # create the nginx conf
+  < "$TMPL_PATH"/all_the_servers.conf.tmpl \
+      envsubst '$SERVER_NAME' >> /etc/nginx/conf.d/default.conf
+  < "$TMPL_PATH"/index.html.tmpl \
+      envsubst '$SERVER_NAME' > /"$SERVER_NAME"/index.html
+
+done < "$PATH_OF_TRUTH"/servers.txt
+
+#/usr/sbin/nginx -t && \
+#/usr/sbin/nginx -g "daemon off;"

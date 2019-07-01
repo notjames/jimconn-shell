@@ -1,0 +1,8 @@
+#!/bin/bash
+
+server_list=$(sed ':a;N;$!ba;s/\n/ /g' /opt/docs/servers.txt)
+
+cp /etc/hosts /etc/hosts.bak
+
+sed -r "s#^(172.*)#\1 $server_list#" /etc/hosts > /etc/hosts.tmp
+cat /etc/hosts.tmp > /etc/hosts
