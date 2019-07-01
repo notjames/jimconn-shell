@@ -52,8 +52,13 @@ $ make clean
 
 # Run outside of docker?
 Totally doable provided you have 1K servers with resolvable names correlating
-to the list of servers provided in `<path>/docs/servers.txt`. If you have those
-things then one need only run:
+to the list of servers provided in `<path>/docs/servers.txt` and...
+
+## Stand-alone runtime Pre-requisite binaries:
+
+  * ruby ~ 2.5
+
+If you have all those things then one need only run:
 
 ```sh
 $ bin/tw-chal docs/servers.txt
