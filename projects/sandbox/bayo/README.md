@@ -7,7 +7,7 @@ There were two challenges I faced in this fun project.
   * Where to get 1K web servers from which to pull status information and
   * The script itself needed to be written as well as supporting files and scripts
 
-# How I decided to solve the problem
+## How I decided to solve the problem
 I obviously wasn't going to instantiate 1K cloud provider instances due to cost and
 proper server management dictated by good devops practice. I decided that
 the most important part of this project wasn't the infrastructure but the
@@ -18,20 +18,20 @@ from where the script is running, simply add the 1K of servers to `/etc/hosts`
 resolving to the IP address of the web server container. This concept worked
 like a charm.
 
-# Pre-requisites
+## Pre-requisites
 In order to run this project as intended (within containers), one must have
 the following binaries installed:
 
   * git
   * docker-ce ~ 18.09.7
 
-# Linux or Mac (Darwin)?
+## Linux or Mac (Darwin)?
 Technically, since this whole project works within containers, it should work
 on any OS platform. That said, however, I've only tested it on Linux (Ubuntu
 18.10). Now, if you run it independently, YMMV. It *should* work on either
 Linux or MacOS.
 
-# How to get this repo
+## How to get this repo
 I placed this in a git repo projects directory that I use for other projects.
 So one will need to, unfortunately, clone the entire repo and then isolate the
 repo project directory named "bayo".
@@ -41,7 +41,7 @@ $ git clone https://github.com/notjames/jimconn-shell
 $ cd jimconn-shell/projects/sandbox/bayo
 ```
 
-# Build and run
+## Build and run
 There is no source "building". There is some setup for containers, however. A
 `Makefile` has been provided to do the heavy lifting. Run the following once
 the repo is pulled:
@@ -53,18 +53,18 @@ $ make
 The `make` command will set up the containers, docker network, and bring up the
 containers necessary to run the `tw-chal` script.
 
-# Once all is done
+## Once all is done
 After the project is done running, one should clean up
 
 ```sh
 $ make clean
 ```
 
-# Run outside of docker?
+## Run outside of docker?
 Totally doable provided you have 1K servers with resolvable names correlating
 to the list of servers provided in `<path>/docs/servers.txt` and...
 
-## Stand-alone runtime Pre-requisite binaries:
+### Stand-alone runtime Pre-requisite binaries:
 
   * ruby ~ 2.5
 
@@ -74,7 +74,7 @@ If you have all those things then one need only run:
 $ bin/tw-chal docs/servers.txt
 ```
 
-# Gotchas
+## Gotchas
 If you run this project in container(s) first and then attempt to run `tw-chal`
 autonomously then you will get an error thrown that `tw-chal` cannot save the
 file named `success-rates.json`. That is because `docker` still runs by default
