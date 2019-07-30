@@ -2,6 +2,13 @@
 
 which=$(command -v which)
 
+get_git_branch()
+{
+  git rev-parse --abbrev-ref HEAD | grep -v HEAD || \
+  git describe --exact-match HEAD 2>/dev/null    || \
+  git rev-parse HEAD
+}
+
 cnct_clone()
 {
   local ghub repo_name client_repo upstream_repo
@@ -85,6 +92,11 @@ maas_machine_id()
 {
   local id
   id=$1
+  [[ -z "$PROFILE" ]] && \
+    {
+      echo >&2 '$PROFILE must be defined.'
+      return 1
+    }
 
   [[ -z "$id" ]] && \
     {
@@ -92,36 +104,60 @@ maas_machine_id()
       return 1
     }
 
-  maas jimconn machines read | \
+  maas "$PROFILE" machines read | \
     jq -Mr --arg name "$id" '
       .[] |
         select(.hostname == $name) |
           .boot_interface.system_id'
 }
 
-function cwb
+cwb()
 {
   git branch | grep -P '^\*' | awk -F '*' '{print $2}' | tr -d ' '
 }
 
-function sm
+sm()
 {
   CWB="$(cwb)"
 
   git checkout master && \
   git fetch upstream && \
   git reset --hard upstream/master && \
-  git pull && git push
+  git pull && git push --force-with-lease
 
   [[ "$CWB" != "master" ]] && \
     {
       git checkout "$CWB" && \
-      git pull --rebase origin master && \
-      git push
+      git pull --rebase upstream master && \
+      git push --force-with-lease
     }
 }
 
+maas-all-custom-images()
+{
+  maas jimconn boot-resources read | jq -Mr '[.[] | select(.id > 300) | .name | select(contains("/") | not) | .]'
+}
+
+when()
+{
+  local the_test
+  the_test=$1
+
+  shift
+  cmd=$*
+
+  while true; do
+    if test "$the_test"; then
+      $cmd
+      return 0
+    fi
+    sleep 1
+  done
+}
+
 alias mmid=maas_machine_id
+alias mmai=maas-all-custom-images
+
 # some more ls aliases
 alias ll='ls -alF'
 alias la='ls -A'
@@ -173,6 +209,7 @@ alias kg='kubectl get -o wide'
 alias kga='kubectl get -o wide --all-namespaces'
 alias kgj='kubectl get -o json'
 alias kd='kubectl describe'
+alias gb='get_git_branch'
 
 #alias k2='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig'
 #alias k2env='printenv | grep -P '\''KRAKEN|K2|KUBE|HELM'\'''
@@ -194,3 +231,5 @@ alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
 
 # add support for ctrl+o to open selected file in VS Code
 export FZF_DEFAULT_OPTS="--bind='ctrl-o:execute(code {})+abort'"
+
+
