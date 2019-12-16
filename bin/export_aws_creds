@@ -1,10 +1,4 @@
 #!/bin/bash
-# Written by Jim Conner
-# Usage: export $($HOME/bin/export_aws_creds [profile name])
-#
-# Purpose: quicky export AWS creds to environment variable
-# depending on profile.
-# **************************************************************
 
 PROFILE=$1
 PROFILE=${PROFILE:-default}

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+lookfor=$1
+lookfor="${lookfor:=kubernetes-master}"
+
+juju status --format json | \
+jq -M -r --arg m $lookfor '
+def machine($id):
+  first(.applications[]
+    | (.units? // empty)
+    | to_entries[]
+    | select(.value.machine == $id)
+    | .key ) ;
+
+[. as $in
+  | .machines
+  | to_entries[]
+  | .key as $key
+  | ($in | machine($key) | match($m))
+  | ($in|machine($key)) as $value
+  | { ($key): ($value) }
+  ] | first
+'

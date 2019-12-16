@@ -1,0 +1,18 @@
+#!/bin/bash
+
+export RSYNC_OPTS=""
+
+src[0]=/home/jimconn
+src[1]=/var/tmp
+src[2]=/etc
+
+dst=/media/sf_Untitled/samsung/linux/
+
+for s in "${src[@]}"; do
+  rsync $RSYNC_OPTS -Purtcv --no-p --no-g \
+                    --no-t -L --munge-links \
+                    --ignore-errors --omit-dir-times \
+                    -O --no-links --timeout 15 \
+                    --exclude-from ~/save/ignorelist \
+                    $s $dst
+done

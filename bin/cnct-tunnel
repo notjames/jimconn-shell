@@ -1,0 +1,94 @@
+#!/bin/bash
+
+DEBUG=${DEBUG:-0}
+[[ $DEBUG == 1 ]] && set -x
+
+socket_base="/var/tmp/run"
+socket="$socket_base/ssh-master.socket"
+endpoint=192.168.2.24
+ssh_priv_key="$HOME/.ssh/jimconn-id_rsa"
+local_port=8088
+remote_port=80
+username=ubuntu
+
+usage()
+{
+  echo """
+  Purpose: start, stop, or check SSH tunnel for CNCT VPN for MaaS lab access.
+
+  Usage: $0 <--start|-S|--check|-c|--stop|-s> [--endpoint|-e <remote address>]
+            [--local-port|-l <port>] [--remote-port|-r <port>] [--username|-u <username>]
+            [--key|-k <privkey path>]
+
+  defaults:
+
+  endpoint        : $endpoint
+  local port      : $local_port
+  remote port     : $remote_port
+  username        : $username
+  private key     : $ssh_priv_key
+  socket          : $socket
+
+  """
+}
+
+start_tunnel()
+{
+  local options
+  options=""
+
+  [[ $DEBUG == 1 ]] && options="-vvv"
+
+  if ! check_tunnel; then
+    # shellcheck disable=SC2086
+    ssh $options -f -N -M -S "$socket" \
+      -L $local_port:localhost:$remote_port \
+      -J jump-1 -i $ssh_priv_key $username@$endpoint
+  fi
+}
+
+stop_tunnel()
+{
+  if check_tunnel; then
+    ssh -S "$socket" -O exit $endpoint
+  fi
+}
+
+check_tunnel()
+{
+  ssh -S "$socket" -O check $endpoint 2>/dev/null
+}
+
+[[ $# == 0 ]] && \
+  {
+    usage
+    exit 1
+  }
+
+while [[ $# -ne 0 ]]; do
+  case $1 in
+    --start|-S) cmd=start_tunnel;;
+    --check|-c) cmd=check_tunnel;;
+    --stop|-s) cmd=stop_tunnel;;
+    --endpoint|-e) shift; endpoint=$1;;
+    --local-port|-l) shift; local_port=$1;;
+    --remote-port|-r) shift; remote_port=$1;;
+    --username|-u) shift; username=$1;;
+    --key|-k) shift; ssh_priv_key=$1;;
+    --socket) shift; [[ $1 =~ ^/ ]] && socket=$1 || socket="$socket_base/$1";;
+    --help|-h) usage; exit 0;;
+    *) echo >&2 "Unknown argument : $1"; exit 1;;
+  esac
+  shift
+done
+
+# mkdir if $socket is custom
+mkdir -p "${socket%/*}"
+
+if [[ -z "$cmd" ]]; then
+  echo >&2 "Required parameter -s, -S, or -c missing"
+  usage
+  exit 1
+fi
+
+$cmd

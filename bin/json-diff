@@ -1,2 +1,1 @@
-#!/usr/bin/env node
-require('../lib/cli')(process.argv.slice(2));
+/home/jimconn/.npm/node_modules/json-diff/bin/json-diff.js
