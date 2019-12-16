@@ -1,5 +1,5 @@
 #!/bin/bash
-# Author: Jim Conner <snafu.x@gmail.com, james.c@samsung.com>
+# Author: Jim Conner <snafu.x _ gee mail + com
 
 _aws_prep_for_new_key()
 {

@@ -1,6 +1,6 @@
 perl -MCGI -le '
 
-my $o = "https://fresh-apps.amazon.com/login/signin?redirect_params=%257B%2522controller%2522%253A%2522application%2522%252C%2522action%2522%253A%2522index%2522%257D";
+my $o = "https://some_url/that/returns/urlencoded/stuff";
 
 @pairs = split(/&/, $o);
 
@@ -12,7 +12,7 @@ for my $pair ( @pairs )
     $name =~ s/%([a-fA-F0-9][a-fA-F0-9])/pack("C", hex($1))/eg;
     $value =~ tr/+/ /;
     $value =~ ;
-    print "$name: $value\n";  
+    print "$name: $value\n";
 }
 
 '

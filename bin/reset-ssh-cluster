@@ -1,0 +1,66 @@
+#!/bin/bash
+
+declare -a node
+export NS=$1
+
+get_clusterapi_controller()
+{
+  kubectl get pods -n default -o json | \
+    jq -M -r '.items[].metadata | select(.name, match("clusterapi-controller")).name' 2>/dev/null
+}
+
+ctrlr="$(get_clusterapi_controller)"
+NS=${NS:-jimconn-centos2}
+max_tries=10
+c=0
+i=0
+
+if [[ -z "$ctrlr" ]]; then
+  echo >&2 "Unable to determine clusterapi-controller. Cannot continue."
+  exit 20
+fi
+
+# 1. inventory machines
+# shellcheck disable=SC2034
+while read -r n g
+do
+  node[$c]="$n"
+
+  let c++
+done <<< "$(kubectl get machines -n "$NS" -o json -o json | jq -M -r '.items[].metadata.name')"
+
+# swap them so worker is first in array
+if [[ "${node[0]}" =~ control ]]; then
+  t=${node[0]}
+  node[0]=${node[1]}
+  node[1]=$t
+  unset t
+fi
+
+if [[ ${node[*]} ]]; then
+  echo "1: ${node[0]}    2: ${node[1]}"
+
+  # do the deletion
+  for n in "${node[@]}"
+  do
+    if [[ -n "$n" ]]; then
+      kubectl delete -n "$NS" machine "$n"
+
+      while read -r line; do
+        echo "$line"
+        sleep 1
+        continue
+        if [[ $(echo "$line" | grep -c "$n"' deletion successful') -gt 0 ]]; then
+          break
+        else
+          [[ $i -gt $max_tries ]] && break 2
+          sleep 1
+          let i++
+        fi
+      done <<< "$(kubectl logs -f "$ctrlr" ssh-machine-controller)"
+    fi
+  done
+else
+  echo 'Nothing to do.'
+fi
+

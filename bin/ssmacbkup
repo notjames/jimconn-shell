@@ -1,0 +1,17 @@
+#!/bin/bash
+
+export RSYNC_OPTS=""
+BASE=/media/sf_jimconn
+
+src[0]=$BASE/
+
+dst=/media/sf_Untitled/samsung/mac/
+
+for s in "${src[@]}"; do
+  rsync $RSYNC_OPTS -Purtcv --no-p --no-g \
+                    --no-t -L --munge-links \
+                    --ignore-errors --omit-dir-times \
+                    -O --no-links --timeout 15 \
+                    --exclude-from ~/save/ignorelist \
+                    $s $dst
+done

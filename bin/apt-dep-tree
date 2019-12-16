@@ -1,0 +1,36 @@
+#!/usr/bin/env ruby
+
+require 'awesome_print'
+deps = []
+
+def dep_pkgs(pkg)
+  `apt-cache depends #{pkg}`
+    .split(/\n/)
+    .grep_v(/Depends: \</)
+    .grep(/Depends: (.*)/)
+    .map{|e| e.scan(/Depends: (.*)/)}
+    .flatten
+end
+
+def main(pkg, deps)
+  $stderr.puts 'main(%s)' % [pkg]
+
+  this_deps = []
+  this_deps = (dep_pkgs pkg) - ['libc6']
+
+  deps.push(this_deps)
+
+  this_deps.each \
+  {|dep|
+    #$stderr.puts 'check %s' % dep
+    main dep, deps
+  }
+
+  deps
+end
+
+deps = main ARGV[0], deps
+
+puts ""
+puts ((deps.flatten.uniq) - ['libc6']).join(' ')
+

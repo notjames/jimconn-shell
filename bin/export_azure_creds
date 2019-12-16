@@ -1,0 +1,33 @@
+#!/bin/bash
+
+PROFILE=$1
+PROFILE=${PROFILE:-default}
+AZ_CREDS_FILE="$HOME/.ms/credentials"
+
+read_creds()
+{
+  grep -A2 "$PROFILE" "$AWS_CREDS_FILE" | tail -n 2
+}
+
+usage()
+{
+  echo """
+  Usage: export \$($0)
+  """
+}
+
+[[ $1 =~ ^-h* ]] && \
+  {
+    usage && exit 0
+  }
+
+[[ ! -f $AZ_CREDS_FILE ]] && \
+  {
+    echo >&2 """
+    Unable to set AZ environment credentials from your AZ credential file.
+    $AZ_CREDS_FILE does not exist.
+    """
+    exit 1
+  }
+
+jq -Mcr 'to_entries | map("\(.key)=\(.value)") | .[]' $AZ_CREDS_FILE

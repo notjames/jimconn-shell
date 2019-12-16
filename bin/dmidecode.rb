@@ -4,7 +4,7 @@ module DMI
 
         def initialize(*args)
             if args
-                dmidecodebin = args[0] 
+                dmidecodebin = args[0]
             end
 
             unless ( dmidecodebin.nil? )
@@ -16,7 +16,7 @@ module DMI
                     unless ( operands.nil? )
                         @all = _dmi_decode(dmidecodebin,operands)
                     else
-                        puts 'FATAL: Seems your dmidecode is old or incapable of showing ' + 
+                        puts 'FATAL: Seems your dmidecode is old or incapable of showing ' +
                              'what fields it will bear.'
                         return 2
                     end
@@ -35,7 +35,7 @@ module DMI
                     unless ( operands.nil? )
                         @all = _dmi_decode(dmidecodebin,operands)
                     else
-                        puts 'FATAL: Seems your dmidecode is old or incapable of showing ' + 
+                        puts 'FATAL: Seems your dmidecode is old or incapable of showing ' +
                              'what fields it will bear.'
                         return 3
                     end
@@ -126,7 +126,7 @@ dmidecode binary to run vs a pure Ruby implimentation.
 
  require 'decode'
  require 'pp'
- 
+
  dmidata = DMI::Decode.new
 
  puts 'Proc Freq: ' + dmidata.processor_frequency
@@ -134,7 +134,7 @@ dmidecode binary to run vs a pure Ruby implimentation.
 
 Note that recent versions of dmidecode allow the user to specify which, if
 any data they want using the -s argument. This is functionality on which
-dmidecode.rb capitalizes. This library does *NOT* parse general dmidecode 
+dmidecode.rb capitalizes. This library does *NOT* parse general dmidecode
 and as such may not work with your use case. YMMV.
 
 Finally, the arguments allowed in dmidecode are used to dynamically create
@@ -169,6 +169,6 @@ dmidata.all
 
 =head1 AUTHOR
 
-Jim Conner <jimconn@amazon.com>
+Jim Conner <snafu.x _ gee mail __ com>
 
 =end

@@ -1,0 +1,38 @@
+#!/bin/sh
+# Copyright 2011 Canonical, Inc
+#           2014 Tianon Gravi
+# Author: Serge Hallyn <serge.hallyn@canonical.com>
+#         Tianon Gravi <tianon@debian.org>
+set -e
+
+# make sure we're in a chrooted environment and that we're not
+# gratuitously umounting the actual system cgroups!
+# https://unix.stackexchange.com/questions/14345/how-do-i-tell-im-running-in-a-chroot
+# this currently builds in ubuntu where ischroot exists, but opting to use
+# a more general method of detection.
+if [ "$(stat -c %d:%i /)" = "$(stat -c %d:%i /proc/1/root/.)" ]; then
+  echo >&2 'Not running in a chrooted environment. Cannot continue.'
+  exit 1
+fi
+
+# if we don't even have the directory we need, something else must be wrong
+if [ ! -d /sys/fs/cgroup ]; then
+  exit 0
+fi
+
+# if /sys/fs/cgroup is not mounted, we don't bother
+if ! mountpoint -q /sys/fs/cgroup; then
+  exit 0
+fi
+
+cd /sys/fs/cgroup
+
+for sys in *; do
+  if mountpoint -q "$sys"; then
+    if umount "$sys"; then
+      rmdir "$sys" || true
+    fi
+  fi
+done
+
+exit 0

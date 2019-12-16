@@ -1,0 +1,21 @@
+#!/bin/sh
+
+K8S_ENDPOINT="https://dl.k8s.io/"
+
+kubeadm_qs()
+{
+  curl -sSL $K8S_ENDPOINT | \
+            xml2json -    | \
+            jq -Mr --arg match_version '/v1.1' \
+                   --arg ARCH amd64 '[.ListBucketResult.Contents[] |
+                select(.Key | match("/bin/linux/\($ARCH)/kubeadm")) |
+                select(.Key | match("\($match_version)"))] | .[].Key'
+}
+
+for qs in $(kubeadm_qs); do
+  filename="${qs##*/}"
+
+  echo "Downloading $filename..."
+  curl -sSL -o "$filename.dl" "$K8S_ENDPOINT/$qs"
+done
+

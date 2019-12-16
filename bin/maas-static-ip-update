@@ -21,8 +21,8 @@ maas_nodes()
   maas "$PROFILE" nodes read
 }
 
-#IP_MODE="static"
-IP_MODE="dhcp"
+IP_MODE="static"
+IP_MODE="auto"
 
 echo "Reading all nodes..."
 all_nodes=$(maas_nodes)

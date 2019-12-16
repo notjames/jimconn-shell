@@ -1,0 +1,103 @@
+#!/bin/bash
+# contributed by @happyskeptic
+# https://askubuntu.com/questions/170348/how-to-create-a-local-apt-repository
+# minor changes made by jimconn.
+set -e
+set -o pipefail
+
+#CONFIG=${1:-/etc/apt/mirror.list}
+#WORKDIR=$(grep -Po 'base_path\s+/.*' "$CONFIG" | awk '{print $2}')
+WORKDIR=$1
+KEYNAME=${KEYNAME:-"CNCT Team"}
+PACKAGE_FILE=${PACKAGE_FILE:-'dists/xenial/main/binary-amd64/Packages'}
+PACKAGE_FILE_PATH='main/binary-amd64/Packages'
+RELEASE_FILE=${RELEASE_FILE:-'dists/xenial/Release'}
+RELEASE_HEADER_FILE="conf/Release.dist"
+DIST_RELEASE_FILE=${DIST_RELEASE_FILE:-'conf/distributions'}
+
+user()
+{
+  echo
+  """
+  usage: $0 [/path/to/apt-mirror/webroot]
+
+  NOTE: this script requires apt-mirror to be installed and /etc/apt/mirror.list to be properly configured.
+
+  The way to use this script is to do the changes to the repo first, i.e. delete or copy in the .deb file to '$WORKDIR', and then run this script
+  This script can be run as an unprivileged user - root is not needed so long as your user can write to the local repository directory
+
+  The default apt-mirror mirror.list (/etc/apt/mirror.list) is used if one is not supplied as the first argument.
+
+
+  NOTE: this script should be run in the root of the repo relative to webroot IE /var/www/ubuntu
+
+  """
+}
+
+w_rel()
+{
+  echo -e "$*" >> "$RELEASE_FILE"
+}
+
+sum_rel()
+{
+  local sum_type
+  sum_type="$1"
+
+  for p in $PACKAGE_FILE*; do
+    local sfx
+    sfx=${p##*.}
+
+    if [[ $sfx =~ / ]]; then
+      sfx=""
+    fi
+
+    if [[ -n "$sfx" ]]; then
+      w_rel " $(printf "%s %16d %s\n" "$($sum_type "$p" | awk '{print $1}')" "$(wc --bytes "$p" | awk '{print $1}')" "$PACKAGE_FILE_PATH.$sfx")"
+    else
+      w_rel " $(printf "%s %16d %s\n" "$($sum_type "$p" | awk '{print $1}')" "$(wc --bytes "$p" | awk '{print $1}')" "$PACKAGE_FILE_PATH")"
+    fi
+  done
+}
+
+main()
+{
+    cd "$WORKDIR" || \
+      {
+        echo >&2 "Unable to chdir to $WORKDIR"
+        exit 1
+      }
+
+    # Generate the Packages file
+    #dpkg-scanpackages -m . /dev/null > "$PACKAGE_FILE"
+    gzip --keep --force -9 "$PACKAGE_FILE"
+    xz -kz --force  "$PACKAGE_FILE"
+    bzip2 -k --force "$PACKAGE_FILE"
+
+    # Generate the Release file
+    cat "$DIST_RELEASE_FILE" > "$RELEASE_FILE"
+
+    # The Date: field has the same format as the Debian package changelog entries,
+    # that is, RFC 2822 with time zone +0000
+    w_rel "Date: $(LANG=C date -Ru)"
+
+    # Release must contain MD5 sums of all repository files (in a simple repo just the Packages and Packages.gz files)
+    w_rel 'MD5Sum:'
+    sum_rel md5sum
+
+    # Release must contain SHA256 sums of all repository files (in a simple repo just the Packages and Packages.gz files)
+    w_rel 'SHA256:'
+    sum_rel sha256sum
+
+    # Clearsign the Release file (that is, sign it without encrypting it)
+    [[ -f dists/xenial/InRelease ]] && rm dists/xenial/InRelease
+    #gpg --clearsign --digest-algo SHA512 --default-key "$KEYNAME" -o dists/xenial/InRelease dists/xenial/Release
+    gpg --clearsign -o dists/xenial/InRelease dists/xenial/Release
+
+    # Release.gpg only need for older apt versions
+    # gpg -abs --digest-algo SHA512 --local-user $USER -o Release.gpg Release
+}
+
+if ! main "$@"; then
+  exit 1
+fi

@@ -1,14 +1,5 @@
-#!/usr/bin/ruby 
-# By Jim Conner <jimconn@amazon.com>
-# AFT Client Engineering 2013
-# 
-# as part of the FCAssetDBClient brazil package
-# and under the FCAssetDBWebsite suite.
-#
-# $Author; $
-# $Date: $
-# $Log: $
-# $Header: $
+#!/usr/bin/ruby
+# Author: Jim Conner <snafu.x _ gee mail __ com>
 #
 # ************************************************************************
 
@@ -20,7 +11,6 @@ require 'sys/cpu'
 require 'cgi'
 require 'json'
 require 'net/http'
-require 'dmidecode'
 require 'ostruct'
 require 'optparse'
 require 'logger'
@@ -36,11 +26,15 @@ PROCDIR = '/sys/class/net'
 BASE    = '/var/tmp'                                        # better location, no root req'd
 $ENVNM  = 'prod'                                            # ARGV --environment (prod by default)
 $TIMEOUT= 6                                                 # seconds - http request timeout
-$TMFUZZ = 10                                                # minutes - meaning that this 
-                                                            # script will actually gather and 
+$TMFUZZ = 10                                                # minutes - meaning that this
+                                                            # script will actually gather and
                                                             # send data to the server
                                                             # within rand(TMFUZZ) mins of
                                                             # invocation.
+
+
+$:.push(File.join(ENV["HOME"],'.local','lib','ruby'))
+require 'dmidecode2'
 
 include Sys
 
@@ -55,7 +49,7 @@ class String
         self.lines.to_a
     end
 
-    def rm_non_ascii(replacement='') 
+    def rm_non_ascii(replacement='')
         self.gsub(/[\u0080-\u00ff]/,replacement)
     end
 end
@@ -105,21 +99,21 @@ class Runtime
         parsed = OptionParser.new\
                  {|opts|
                      opts.banner = "Usage: #{$0}"
- 
+
                      opts.on('-d', '--debug', 'Show debug output')\
                      do |debug|
                          options.verbose = debug
                          OUTPUT.level    = Logger::DEBUG
                          OUTPUT.debug('Output level set to debug...')
                      end
- 
+
                      opts.on('-n', '--dry-run', 'Dryrun. Do not send data to the server.')\
                      do |dryrun|
                          options.dryrun  = true
                          OUTPUT.debug('Dry-run only. No data will be sent to AssetDB')
                      end
 
-                     opts.on('-F <s>', '--fuzz-factor <seconds>', Integer, 
+                     opts.on('-F <s>', '--fuzz-factor <seconds>', Integer,
                              'Set fuzz factor (default is: ' + $TMFUZZ.to_s + ')')\
                      do |fuzz|
                          if fuzz > 0 and fuzz <= 60
@@ -131,13 +125,13 @@ class Runtime
 
                          OUTPUT.info('Fuzz factor set to: ' + fuzz.to_s + ' minutes')
                      end
- 
+
                      opts.on('-N', '--now', 'Skip time fuzz and execute NOW!')\
                      do |now|
                          options.exec_now = now
                          OUTPUT.info('By-passing fuzz-factor start and executing NOW!')
                      end
- 
+
                      opts.on('-E <endpoint>', '--endpoint <assetdb server>', String,
                              'valid host to which to send updates.')\
                      do |endpoint|
@@ -147,10 +141,10 @@ class Runtime
                             OUTPUT.info('Prepended https:// as scheme of URI making: ' + endpoint)
                         end
 
-                        unless endpoint =~ /\.amazon\.com$/
-                            endpoint = endpoint + '.amazon.com'
+                        unless endpoint =~ /\.domain\.com$/
+                            endpoint = endpoint + '.domain.com'
 
-                            OUTPUT.info('Appended ".amazon.com" to URI making: ' + endpoint)
+                            OUTPUT.info('Appended ".domain.com" to URI making: ' + endpoint)
                         end
 
                         options.endpoint = endpoint
@@ -198,8 +192,8 @@ class HwInfoClient
         @last_author  = AUTHOR
 
         @info         = {
-                            :version      => @version, 
-                            :version_date => @version_date, 
+                            :version      => @version,
+                            :version_date => @version_date,
                             :last_author  => @last_author
                         }
 
@@ -216,12 +210,12 @@ class Environment < Runtime
         @cmdline     = {'data' => _get_cmdline}
         @system_env  = {'data' => _get_system_env}
     end
-    
+
     private
     def _get_cmdline
         @method_name = __method__.to_s
         cmdline      = '/proc/cmdline'
-        
+
         unless File.stat(cmdline).nil?
             begin
                 data = File.open(cmdline).read.chomp.gsub!(/\s+/,' ').split(/\s/)
@@ -231,7 +225,7 @@ class Environment < Runtime
         else
             data = cmdline + ' does not exist on this system.'
         end
-        
+
         data
     end
 
@@ -255,7 +249,7 @@ class Device < Environment
             sn    = @dmi.system_serial_number.tr_s('-','')
             make  = @dmi.system_manufacturer.slice(0,8).tr_s(' ','').tr_s('-','')
             model = @dmi.system_product_name.slice(0,8).tr_s(' ','').tr_s('-','')
-            
+
             @id   = make + '-' + model + '-' + sn
         else
             raise RuntimeError, 'Unable to determine device ID. DMI Data not obtainable.'
@@ -263,7 +257,7 @@ class Device < Environment
     end
 
     def _dmidecode(options)
-        # Let's do it this way. Order of precedence. 
+        # Let's do it this way. Order of precedence.
         # options.dmi
         # /usr/bin/dmidecode
         # ./dmidecode
@@ -307,7 +301,7 @@ class Device < Environment
         }
 
         if miss > 0 and miss == dmi_bin.count
-            OUTPUT.fatal 'Unable to locate a valid dmidecode binary. Quitting. ' + 
+            OUTPUT.fatal 'Unable to locate a valid dmidecode binary. Quitting. ' +
                          'Try running with --use-dmidecode /path/to/dmidecode.'
         end
 
@@ -325,8 +319,8 @@ class Network
         _get_interface_data
         @all
     end
-    
-    # returns MAC for interface request by caller or hash of interfaces with 
+
+    # returns MAC for interface request by caller or hash of interfaces with
     # respective MAC address if no args supplied. Returns nil if interfaces
     # don't exist or supplied interface from caller is non existent.
     def hwaddr(args = {})
@@ -394,18 +388,18 @@ class Network
     # a way. According to wireless.h (and I don't know C
     # that well so I could be wrong), the functions for bssid
     # are used for setting the bssid rather than obtaining
-    # the bssid. iw doesn't even have a function call for 
+    # the bssid. iw doesn't even have a function call for
     # obtaining the bssid. Wpa_cli doesn't use ioctl. It uses
     # the same method I'm using in _wpa_status to pull general
     # wifi info. Iw doesn't have a get function for bssid.
     # Use of this method requires hwinfo to be run as root, however.
-    # In fact, at the system level, any method used to pull 
+    # In fact, at the system level, any method used to pull
     # bssid requires permissions of a priviledged user.
     def _wpa_status(interface)
         wpa_data = nil
 
         unless interface.nil?
-            # need to write a method to get the src_sock_path 
+            # need to write a method to get the src_sock_path
             # programmatically. Fortunately, for thinclients
             # this is going to be the correct sock path 99%.
             # ideas to get programmatically would be:
@@ -492,7 +486,7 @@ class Network
                 if ( route.iface == interface and route.destination == '00000000')
                     gwaddr = route.gateway.to_s.hex
                     ipaddr = [24, 16, 8, 0].collect {|b| (gwaddr >> b) & 255}.reverse
-                    
+
                     begin
                         gw_addr = Socket.gethostbyaddr(ipaddr.pack('CCCC'))[0] || ipaddr.join('.')
                     rescue
@@ -581,11 +575,11 @@ class Network
                 # and take only elements 7 through the end
                 # globally substitute the return from /regex/ with ''
                 # remove any '' or nil elements from returned array
-                cdp_data = cdp.read.chomp!                   
-                           .split(/\n/)[7 .. cdp.size]       
-                           .map{|element|                    
+                cdp_data = cdp.read.chomp!
+                           .split(/\n/)[7 .. cdp.size]
+                           .map{|element|
                                  element.gsub!(/^\s+value:\s+/,'')
-                            } - ['',nil]                     
+                            } - ['',nil]
             end
 
             cdp_data = cdp_data.join('/')
@@ -613,8 +607,8 @@ class Network
                                            :hwaddr  => '/address'  ,
                                            :mtu     => '/mtu'      ,
                                        },
-                      }  
-        
+                      }
+
         @ifs.each\
         {|interface|
             ( interface =~ /eth/ ) ? base = whats_where[:ethernet] : base = whats_where[:wifis]
@@ -650,7 +644,7 @@ class Network
                         end
                     rescue => e
                         error = 'Unable to read: ' + file.to_s + ': ' + e.exception.to_s
-                        # Don't get confused by this. Assigns error to variable 
+                        # Don't get confused by this. Assigns error to variable
                         # and then outputs it Just a little shorthand.
                         OUTPUT.warn(tmp["#{status_type}"] = error)
                     end
@@ -719,7 +713,7 @@ class Hardware
         Uname.uname.members.each{|member|
             uname["#{member}"] = Uname.uname["#{member}"]
         }
-        
+
         OUTPUT.debug('Uname data: ' + uname.inspect)
         uname
     end
@@ -739,7 +733,7 @@ class Hardware
         Filesystem.mounts.each\
         {|member|
             fs << {
-                      :mount_name  => member.name, 
+                      :mount_name  => member.name,
                       :mount_type  => member.mount_type,
                       :mount_point => member.mount_point,
                   }
@@ -760,9 +754,9 @@ class Hardware
         memory  = nil
 
         unless File.stat(MEMINFO).nil?
-            begin 
+            begin
                 memory = Hash[                               # see last step
-                             File.open(MEMINFO).             # open /proc/meminfo  
+                             File.open(MEMINFO).             # open /proc/meminfo
                                   read.                      # read it into memory and
                                   chomp.                     # chomp trailing record separator (usually \n)
                                   split(/\n/).               # return lines split by new lines
@@ -770,21 +764,21 @@ class Hardware
                                       line.gsub!(/\s+/,'')   # global substitute all spaces with ''
                                                              # then split into pairs delimited by ':'
                                                              # and assign the left side as key and the right as value
-                                      key,value = line.split(/:/) 
-  
+                                      key,value = line.split(/:/)
+
                                       if key =~ /[a-z][A-Z]/ # if key is camel-humped then put space in front
                                                              # of capped letter (next line)
                                           key.gsub!(/([a-z])([A-Z])/,'\\1_\\2')
                                       end
-  
+
                                       key.downcase!          # lower case the key
-  
+
                                                              # if key is "hugepages_size" then rename it.
                                       key.eql?('hugepagesize') && key = 'huge_page_size'
-                                                             
+
                                                              # make keyword(blah) like keyword_blah
                                       key =~ /\(/ && key.gsub!('(','_').gsub!(/\)/,'')
-  
+
                                       [key,value]            # make the resultant value (array)
                                   }                          # return the array of (key,value)
                              ]                               # and Hash[] enumerates each array into a keyed index.
@@ -813,7 +807,7 @@ end
 
 class HwHttpClient
     attr_accessor :payload, :type, :uri, :response, :code, :http_body, :status
-    
+
     def initialize(*args)
 # initialize response
         @status  = false
@@ -861,8 +855,8 @@ class HwHttpClient
         end
 
         OUTPUT.debug("\n" +
-                     ' > Using URI: ' + @uri.inspect + "\n" + 
-                     ' - Scheme: '    + @uri.scheme.to_s + "\n" + 
+                     ' > Using URI: ' + @uri.inspect + "\n" +
+                     ' - Scheme: '    + @uri.scheme.to_s + "\n" +
                      ' - Host: '      + @uri.host.to_s + "\n" +
                      ' - Port: '      + @uri.port.to_s + "\n" +
                      ' - Path: '      + @uri.path.to_s)
@@ -926,7 +920,7 @@ class HwHttpClient
                 exit 4
             end
         end
-        
+
         OUTPUT.debug(' - response from server: ' + response.inspect)
 
         case response
@@ -949,7 +943,7 @@ class HwHttpClient
                 new_location = response['location']
                 limit        = limit - 1
 
-                OUTPUT.debug('Server redirected request to ' + new_location.to_s + 
+                OUTPUT.debug('Server redirected request to ' + new_location.to_s +
                              " this redirect count:  (10 - #{limit})")
 
                 @status = false
@@ -990,7 +984,7 @@ class HwHttpClient
 
             @status
         end
-    end 
+    end
 end
 
 # ******** Now all of the actual runtime stuff *********
@@ -1040,7 +1034,7 @@ while true
     unless environment.options.exec_now
         now  = Time.new
 
-        OUTPUT.debug('Waiting to execute -- fuzz factor was: ' + 
+        OUTPUT.debug('Waiting to execute -- fuzz factor was: ' +
                       environment.options.fuzz_factor.inspect + ' mins')
         OUTPUT.debug('  time to kickoff is: ' + when_to_kickoff.inspect)
         OUTPUT.debug('  now is: ' + now.inspect)
