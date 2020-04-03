@@ -1,0 +1,92 @@
+#!/bin/bash
+
+VPN_ENDPOINT="<VPN_ENDPOINT_ADDR>"
+UBN_USERNAME=ubnt
+TMPL="$HOME/bin/$(basename $0).txt.tmpl"
+NEW_VPN_USER=$1
+NEW_VPN_PASSWD="$("$HOME"/bin/genpasswd)"
+VPNPSK=''
+DEPS=(sshpass envsubst)
+
+# courtesy of https://community.ui.com/questions/Configure-ER-over-non-interactive-SSH/42f7dbf3-240a-4e71-b39a-9313e6ca262b
+prepare_command()
+{
+  prefix='/opt/vyatta/sbin/vyatta-cfg-cmd-wrapper '
+  r=$(echo -n "$1" | tr '\n' ';' | sed "s%;\([ \t\v\f]*[^ \t\v\f;#]\+\)%;$prefix\1%g" | tr ';' '\n')
+  echo -n "$prefix$r"
+}
+
+get_psk()
+{
+  cmd=$(prepare_command "begin
+  show vpn l2tp remote-access ipsec-settings authentication pre-shared-secret
+  end")
+
+  VPNPSK=$(sshpass -e ssh -tt "$UBN_USERNAME"@"$VPN_ENDPOINT" "$cmd" | awk '{print $2}')
+
+  if [[ -z "$VPNPSK" ]] || [[ "$VPNPSK" == "" ]]; then
+    echo >&2 'Failed to get PSK from VPN endpoint. Cannot continue.'
+    exit 1
+  fi
+}
+
+chkdeps()
+{
+  for d in "${DEPS[@]}"; do
+    if ! /usr/bin/which "$d" >/dev/null 2>&1; then
+      echo >&2 "dependency: $d is missing"
+      exit 1
+    fi
+  done
+}
+
+create_vpnuser()
+{
+  cmd=$(prepare_command "begin
+  set vpn l2tp remote-access authentication local-users username $NEW_VPN_USER password \"$NEW_VPN_PASSWD\"
+  commit
+  save
+  end")
+
+  #echo -e "EXECUTING:\n$cmd"
+  #sshpass -e ssh -tt "$UBN_USERNAME"@"$VPN_ENDPOINT" "$cmd" > /dev/null 2>&1
+  sshpass -e ssh -tt "$UBN_USERNAME"@"$VPN_ENDPOINT" "$cmd" > /dev/null 2>&1
+}
+
+main()
+{
+  NEW_VPN_PASSWD="${1:-"$NEW_VPN_PASSWD"}"
+
+  chkdeps
+  get_psk
+  create_vpnuser
+
+  export NEW_VPN_USER NEW_VPN_PASSWD VPNPSK
+  envsubst < "$TMPL"
+}
+
+if [[ -z "$NEW_VPN_USER" ]]; then
+  echo >&2 "Usage: $0 <new_user> [new password]"
+  exit 1
+fi
+
+if [[ -z "$SSHPASS" ]]; then
+  echo >&2 'Please export SSHPASS=<ubnt_password>'
+  exit 1
+fi
+
+echo "
+WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!!
+
+If the user you are attempting to create '$NEW_VPN_USER' already exists
+then this script will OVERWRITE the existing password with the new password!
+
+Do you want to continue? If not, press ctrl+c now! Otherwise, press ENTER key.
+
+WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!! WARNING!!!
+"
+
+# shellcheck disable=SC2034
+read -r go
+
+main "$2"
