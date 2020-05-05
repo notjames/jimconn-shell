@@ -1,0 +1,2 @@
+gem 'soda-ruby', :require => 'soda'
+gem 'inifile', '~>3.0.0'
