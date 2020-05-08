@@ -1,6 +1,7 @@
 GEM
+  remote: https://rubygems.org/
   specs:
-    ffi (1.9.10)
+    ffi (1.12.2)
     hashie (3.6.0)
     inifile (3.0.0)
     multipart-post (2.0.0)
@@ -15,6 +16,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  ffi (>= 1.9.24)
   inifile (~> 3.0.0)
   soda-ruby
 
