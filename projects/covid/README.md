@@ -39,13 +39,13 @@ them as accurate as possible from the source. My initial thoughts are that I'm
 not convinced that the CDC is doing a good job of keeping the numbers consistent
 between the different endpoints. I am open to a couple of possibilities here.
 
-  # The publically available APIs are not the same as the ones used internally
+  1 The publically available APIs are not the same as the ones used internally
   at the CDC
-  # The APIs are the same and there are multiple people maintaining different
+  1 The APIs are the same and there are multiple people maintaining different
   projects
-  # I don't understand the difference between the like-named endpoints and thus
+  1 I don't understand the difference between the like-named endpoints and thus
   my understanding of what the mis-matched numbers represent is simply unknown
-  # something else I just haven't thought of yet
+  1 something else I just haven't thought of yet
 
 These kinds of inconsistencies make it super easy to believe we Americans are
 being lied to. I'm going to keep an objective perspective on this project until
