@@ -8,6 +8,8 @@ the references section at the end of this document.
 These are free, publically available APIs, which I assume are maintained
 by the CDC given the domain is owned by cdc.gov.
 
+Here's the code: https://github.com/notjames/jimconn-shell/blob/master/projects/covid/sources/bin/flu-stats
+
 # Inferences
 I haven't made any yet. I've been trying to simply grab the numbers and keep
 them as accurate as possible from the source. My initial thoughts are that I'm
