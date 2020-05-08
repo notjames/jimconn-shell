@@ -249,13 +249,21 @@ influenza_deaths           => 23884
 # References
 
 https://dev.socrata.com/
+
 https://www.opendatanetwork.com/
+
 https://dev.socrata.com/foundry/data.cdc.gov/pp7x-dyj2
+
 https://dev.socrata.com/foundry/data.cdc.gov/r8kw-7aab
+
 https://dev.socrata.com/foundry/data.cdc.gov/uggs-hy5q
+
 https://dev.socrata.com/foundry/data.cdc.gov/hc4f-j6nb
+
 https://dev.socrata.com/foundry/data.cdc.gov/9bhg-hcku
 
 https://github.com/socrata/soda-ruby
+
 https://dev.socrata.com/docs/endpoints.html
+
 https://dev.socrata.com/docs/queries/
