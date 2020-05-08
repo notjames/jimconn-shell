@@ -1,2 +1,4 @@
+source 'https://rubygems.org'
+gem 'ffi', '>= 1.9.24'
 gem 'soda-ruby', :require => 'soda'
 gem 'inifile', '~>3.0.0'
