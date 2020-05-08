@@ -8,12 +8,19 @@
 # https://dev.socrata.com/docs/endpoints.html
 # https://dev.socrata.com/docs/queries/
 
-require 'soda'
+require 'soda/client'
 require 'inifile'
 require 'optparse'
 require 'ostruct'
 require 'pathname'
 require 'awesome_print'
+require 'pry'
+
+class Super
+  class << self
+    attr_accessor :data, :client, :now, :source_title, :source_api_id
+  end
+end
 
 class Config
   attr_reader :config, :options
@@ -97,7 +104,8 @@ class Flu
   attr_reader :data, :response, :client
 
   # 'pp7x-dyj2' # Flu and pneumonia
-  def initialize(c, api_id: 'pp7x-dyj2')
+  def initialize(c)
+    api_id  = 'pp7x-dyj2'
     @client = SODA::Client.new({:domain => c.options.api_domain, :app_token => c.options.key_secret})
     @response = client.get(api_id, {:geoid => 'National', :age => 'All', '$where' => 'deaths_from_influenza > "0"'})
     @data =_sort(@response)
@@ -125,37 +133,186 @@ class Flu
 end
 
 #  https://data.cdc.gov/resource/r8kw-7aab.json
+#  https://dev.socrata.com/foundry/data.cdc.gov/r8kw-7aab
+#  https://dev.socrata.com/foundry/data.cdc.gov/uggs-hy5q
+#  https://dev.socrata.com/foundry/data.cdc.gov/hc4f-j6nb
+#  r8kw-7aab # provisional Covid-19 death counts by week ending date and state
 class Covid
-  attr_reader :data, :response, :client
+  attr_reader :data, :client, :now, :source_title, :source_api_id
 
-  # r8kw-7aab # Covid-19 death counts by week ending date and state
-  def initialize(c, api_id: 'r8kw-7aab')
+  def initialize(c)
+    @now    = Time.now.strftime('%Y-%m-%dT00:00:00.000')
     @client = SODA::Client.new({:domain => c.options.api_domain, :app_token => c.options.key_secret})
-    @response = client.get(api_id, {:start_week => '2019-11-01T00:00:00.000',
-                                     :end_week => '2020-05-05T00:00:00.000',
-                                     '$where' => 'pneumonia_influenza_and_covid > 0'})
-    ap @response.body
-    @data = _sort(@response)
+  end
+
+  def s1
+    response     = {}
+    data         = {}
+    api_id       = 'r8kw-7aab'
+    response     = @client.get(api_id, :state => 'United States')
+    period       = '%s-%s' % [response.body.first['start_week'], @now]
+
+    data[period] = {}
+    base         = data[period]
+
+    response.body.each \
+    {|obj|
+      unless base.has_key? :covid_deaths
+        base[:covid_deaths]     = 0
+        base[:influenza_deaths] = 0
+      end
+
+      base[:covid_deaths]     += obj['covid_deaths'].to_i
+      base[:influenza_deaths] += obj['influenza_deaths'].to_i
+    }
+
+    @source_api_id = api_id
+    @source_title  = 'Provisional Covid Deaths source 1'
+    @data = data
+    self
+  end
+
+  def s2
+    response     = {}
+    data         = {}
+    api_id       = 'uggs-hy5q'
+    response     = @client.get(api_id, :state => 'United States')
+    period       = '%s-%s' % [response.body.first['start_week'], @now]
+
+    data[period] = {}
+    base         = data[period]
+
+    response.body.each \
+    {|obj|
+      unless base.has_key? :covid_deaths
+        base[:covid_deaths]     = 0
+        base[:influenza_deaths] = 0
+      end
+
+      base[:covid_deaths]     += obj['covid19_deaths'].to_i
+      base[:influenza_deaths] += obj['influenza_deaths'].to_i
+    }
+
+    @source_api_id = api_id
+    @source_title  = 'Provisional Covid Deaths source 2'
+    @data = data
+    self
+  end
+
+  def s3
+    response     = {}
+    data         = {}
+    api_id       = 'hc4f-j6nb'
+    response     = @client.get(api_id, :state => 'United States')
+    period       = '%s-%s' % [response.body.first['start_week'], @now]
+
+    data[period] = {}
+    base         = data[period]
+
+    response.body.each \
+    {|obj|
+      unless base.has_key? :covid_deaths
+        base[:covid_deaths]     = 0
+        base[:influenza_deaths] = 0
+      end
+
+      base[:covid_deaths]     += obj['covid_deaths'].to_i
+      base[:influenza_deaths] += obj['all_influenza_deaths_j09_j11'].to_i
+    }
+
+    @source_api_id = api_id
+    @source_title  = 'Provisional Covid Deaths source 3'
+    @data = data
+    self
   end
 
   def print
+    $stderr.puts '%s from %s' % [@source_title, @source_api_id]
     ap @data
   end
 
   private
   def _sort(response)
-    data   = {}
+    response
+  end
+end
+
+class S4 < Covid
+  def initialize(c)
+    super c
+    s4
+  end
+
+  # https://dev.socrata.com/foundry/data.cdc.gov/9bhg-hcku
+  def s4
+    response = {}
+    data     = base = {}
+    api_id   = '9bhg-hcku'
+    response = @client.get(api_id, :state => 'United States')
+    period   = '%s-%s' % [response.body.first['start_week'], @now]
+    base     = {:totals => {}, :detail => {}}
 
     response.body.each \
     {|obj|
-      unless data.has_key? obj[:season]
-        data[obj[:season]] = 0
+      unless base[:totals].has_key? :covid_deaths
+        base[:totals][:covid_deaths]     = 0
+        base[:totals][:influenza_deaths] = 0
       end
 
-      data[obj[:season]] += obj[:deaths_from_pneumonia_and_influenza].to_i
+      unless base[:detail].has_key? obj[:sex]
+        base[:detail][obj[:sex]] = {}
+      end
+
+      unless base[:detail][obj[:sex]].has_key? obj[:age_group]
+        base[:detail][obj[:sex]][obj[:age_group]] = {}
+      end
+
+      unless base[:detail][obj[:sex]][obj[:age_group]].has_key? :covid19
+        base[:detail][obj[:sex]][obj[:age_group]][:covid19] = 0
+      end
+
+      unless base[:detail][obj[:sex]][obj[:age_group]].has_key? :influenza
+        base[:detail][obj[:sex]][obj[:age_group]][:influenza] = 0
+      end
+
+      base[:totals][:covid_deaths]                          += obj['covid_19_deaths'].to_i
+      base[:totals][:influenza_deaths]                      += obj['influenza_deaths'].to_i
+      base[:detail][obj[:sex]][obj[:age_group]][:covid19]   += obj[:covid_19_deaths].to_i
+      base[:detail][obj[:sex]][obj[:age_group]][:influenza] += obj[:influenza_deaths].to_i
     }
 
-    data = data.sort.to_h
+    @source_api_id = api_id
+    @source_title  = 'Provisional COVID-19 Death Counts by Sex, Age, in the U.S. (source 4)'
+    data[period] = base
+    @data = data
+  end
+
+  def specific(period, type)
+    puts "Statistics for death type: %s" % [type]
+
+    @data[period][:detail].each \
+    {|gender, obj|
+      puts gender
+      obj.each \
+      {|group, value|
+        puts "\t%-30s => %s" % [group, value[type]]
+      }
+    }
+    puts
+  end
+
+  def print
+    $stderr.puts '%s from %s' % [@source_title, @source_api_id]
+    period = @data.keys.first
+
+    specific period, :influenza
+    specific period, :covid19
+    puts
+
+    @data[period][:totals].each \
+    {|type, value|
+      puts '%-25s  => %s' % [type,value]
+    }
   end
 end
 
@@ -165,8 +322,12 @@ unless (c = Config.new)
   $stderr.puts 'ended with error(s)'
 end
 
-flu = Flu.new(c)
-flu.print
+flu    = Flu.new(c)
+covid  = Covid.new(c)
+s4     = S4.new(c)
 
-covid = Covid.new(c)
-covid.print
+flu.print
+covid.s1.print
+covid.s2.print
+covid.s3.print
+s4.print
