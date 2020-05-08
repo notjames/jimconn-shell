@@ -2,9 +2,36 @@
 I wanted to scrutinize the numbers myself because something wasn't adding up
 with respect to the flu deaths in the 2019-2020 season compared to Covid deaths.
 
-I was able to obtain a CDC API key (links are in the `flu-status.rb` script.
+I was able to obtain a CDC API key (links are in the `flu-status` script.
 These are free, publically available APIs, which I assume are maintained
 by the CDC given the domain is owned by the CDC.
+
+# How to run
+This script runs in Linux. It will likely work in Mac (terminal) without any
+tweaks. You must first obtain an API key and token which will require you to
+create a free account at the CDC. I'll get more instructions for folks on how to
+do that another time. If you're running Windows 10 then you can install Linux
+WSL. Instructions on how to do that is way outside the scope of this project.
+Just Google `Windows 10 WSL install`.
+
+To run the script, save your API token data in a file in `ini` format to a file
+called `soda.key` in whichever directory you desire (just make sure you remember
+where you put it):
+
+```
+[default]
+key_id = <key>
+key_secret = <secret token>
+```
+
+Run `chmod 600 /path/to/soda.key`
+
+Make sure `flu-data` is `chmod 755 /path/to/sources/bin/flu-stats` and then run
+the script:
+
+```
+/path/to/sources/bin/flu-stats -c /path/to/soda.key
+```
 
 # Inferences
 I haven't made any yet. I've been trying to simply grab the numbers and keep
@@ -50,7 +77,7 @@ this to be publically available is so that my work is reviewed and approvied. If
 there mistakes, please let me know so I can fix them. I'm seeking review for
 code and method.
 
-# Latest out from sources/bin/flu-stats.rb
+# Latest out from sources/bin/flu-stats
 
 Flu deaths from 2009 to 2019 by season
 ```
