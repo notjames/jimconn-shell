@@ -2,36 +2,11 @@
 I wanted to scrutinize the numbers myself because something wasn't adding up
 with respect to the flu deaths in the 2019-2020 season compared to Covid deaths.
 
-I was able to obtain a CDC API key (links are in the `flu-status` script.
+I was able to obtain a CDC API key (links are in the `flu-status` script and in
+the references section at the end of this document.
+
 These are free, publically available APIs, which I assume are maintained
-by the CDC given the domain is owned by the CDC.
-
-# How to run
-This script runs in Linux. It will likely work in Mac (terminal) without any
-tweaks. You must first obtain an API key and token which will require you to
-create a free account at the CDC. I'll get more instructions for folks on how to
-do that another time. If you're running Windows 10 then you can install Linux
-WSL. Instructions on how to do that is way outside the scope of this project.
-Just Google `Windows 10 WSL install`.
-
-To run the script, save your API token data in a file in `ini` format to a file
-called `soda.key` in whichever directory you desire (just make sure you remember
-where you put it):
-
-```
-[default]
-key_id = <key>
-key_secret = <secret token>
-```
-
-Run `chmod 600 /path/to/soda.key`
-
-Make sure `flu-data` is `chmod 755 /path/to/sources/bin/flu-stats` and then run
-the script:
-
-```
-/path/to/sources/bin/flu-stats -c /path/to/soda.key
-```
+by the CDC given the domain is owned by cdc.gov.
 
 # Inferences
 I haven't made any yet. I've been trying to simply grab the numbers and keep
@@ -79,8 +54,43 @@ this to be publically available is so that my work is reviewed and approved. If
 there mistakes, please let me know so I can fix them. I'm seeking review for
 code and method.
 
-# Latest out from sources/bin/flu-stats
+# Getting this script
+The fastest way to get this script is to install and use `wget` and then run:
 
+```
+cd $HOME/Downloads
+wget https://github.com/notjames/jimconn-shell/blob/master/projects/covid/sources/bin/flu-stats
+chmod 755 flu-stats
+```
+
+# How to run
+This script runs in Linux. It will likely work in Mac (terminal) without any
+tweaks. You must first obtain an API key and token which will require you to
+create a free account at the CDC. I'll get more instructions for folks on how to
+do that another time. If you're running Windows 10 then you can install Linux
+WSL. Instructions on how to do that is way outside the scope of this project.
+Just Google `Windows 10 WSL install`.
+
+To run the script, save your API token data in a file in `ini` format to a file
+called `soda.key` in whichever directory you desire (just make sure you remember
+where you put it):
+
+```
+[default]
+key_id = <key>
+key_secret = <secret token>
+```
+
+Run `chmod 600 /path/to/soda.key`
+
+Make sure `flu-data` is `chmod 755 /path/to/sources/bin/flu-stats` and then run
+the script:
+
+```
+/path/to/sources/bin/flu-stats -c /path/to/soda.key
+```
+
+# Latest out from sources/bin/flu-stats
 Flu deaths from 2009 to 2019 by season
 ```
 {
@@ -227,3 +237,17 @@ Unknown
 covid_deaths               => 176063
 influenza_deaths           => 23884
 ```
+
+# References
+
+https://dev.socrata.com/
+https://www.opendatanetwork.com/
+https://dev.socrata.com/foundry/data.cdc.gov/pp7x-dyj2
+https://dev.socrata.com/foundry/data.cdc.gov/r8kw-7aab
+https://dev.socrata.com/foundry/data.cdc.gov/uggs-hy5q
+https://dev.socrata.com/foundry/data.cdc.gov/hc4f-j6nb
+https://dev.socrata.com/foundry/data.cdc.gov/9bhg-hcku
+
+https://github.com/socrata/soda-ruby
+https://dev.socrata.com/docs/endpoints.html
+https://dev.socrata.com/docs/queries/
