@@ -58,10 +58,18 @@ code and method.
 The fastest way to get this script is to install and use `wget` and then run:
 
 ```
-cd $HOME/Downloads
-wget https://github.com/notjames/jimconn-shell/blob/master/projects/covid/sources/bin/flu-stats
-chmod 755 flu-stats
+$ cd $HOME/Downloads
+$ wget https://github.com/notjames/jimconn-shell/blob/master/projects/covid/sources/bin/flu-stats
+$ wget https://github.com/notjames/jimconn-shell/blob/master/projects/covid/sources/Gemfile
+$ chmod 755 flu-stats
+$ sudo gem install bundle
+$ bundle install
 ```
+
+This script requires Ruby 2.5.x to run. There are a couple of libraries
+needed to run as well hence the `bundle install` command.
+
+More will be done in the future to make this easier for people to play with.
 
 # How to run
 This script runs in Linux. It will likely work in Mac (terminal) without any
