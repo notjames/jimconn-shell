@@ -1,7 +1,59 @@
-Provisional Covid Deaths source 1 from r8kw-7aab
-Provisional Covid Deaths source 2 from uggs-hy5q
-Provisional Covid Deaths source 3 from hc4f-j6nb
-Provisional COVID-19 Death Counts by Sex, Age, in the U.S. (source 4) from 9bhg-hcku
+# Purpose
+I wanted to scrutinize the numbers myself because something wasn't adding up
+with respect to the flu deaths in the 2019-2020 season compared to Covid deaths.
+
+I was able to obtain a CDC API key (links are in the `flu-status.rb` script.
+These are free, publically available APIs, which I assume are maintained
+by the CDC given the domain is owned by the CDC.
+
+# Inferences
+I haven't made any yet. I've been trying to simply grab the numbers and keep
+them as accurate as possible from the source. My initial thoughts are that I'm
+not convinced that the CDC is doing a good job of keeping the numbers consistent
+between the different endpoints. I am open to a couple of possibilities here.
+
+  # The publically available APIs are not the same as the ones used internally
+  at the CDC
+  # The APIs are the same and there are multiple people maintaining different
+  projects
+  # I don't understand the difference between the like-named endpoints and thus
+  my understanding of what the mis-matched numbers represent is simply unknown
+  # something else I just haven't thought of yet
+
+These kinds of inconsistencies make it super easy to believe we Americans are
+being lied to. I'm going to keep an objective perspective on this project until
+I can get more obvious and truthful details. This project is in its infantile
+status and so I can't make any reliable assumptions yet.
+
+# Obvious conclusions
+The only conclusion I can make so far is that the numbers between the sources
+don't add up...at all. By "add up," I don't mean mathematically. I mean
+logically. The numbers between the sources don't match up. The numbers in these
+sources don't match up to what we're told in the media. Things just aren't
+adding up. So, I need to research that more.
+
+# Notes
+  * These numbers represent the United States only!
+  * A Flu season is considered to run from about November to between April and
+    June depending on the numbers of people sick I believe.
+
+# Author
+Jim Conner
+
+# Bugs
+Likely. This project is still in heavy development when I have time to work on
+it.
+
+# About the project
+I am not a statistician. I am a software developer. One of the reasons I want
+this to be publically available is so that my work is reviewed and approvied. If
+there mistakes, please let me know so I can fix them. I'm seeking review for
+code and method.
+
+# Latest out from sources/bin/flu-stats.rb
+
+Flu deaths from 2009 to 2019 by season
+```
 {
     "2009-10" => 192152,
     "2010-11" => 198253,
@@ -14,25 +66,43 @@ Provisional COVID-19 Death Counts by Sex, Age, in the U.S. (source 4) from 9bhg-
     "2017-18" => 195386,
     "2018-19" => 87074
 }
+```
+
+Provisional Covid Deaths source 1 from r8kw-7aab
+```
 {
     "2020-02-01T00:00:00.000-2020-05-08T00:00:00.000" => {
             :covid_deaths => 45632,
         :influenza_deaths => 6000
     }
 }
+```
+
+
+Provisional Covid Deaths source 2 from uggs-hy5q
+```
 {
     "2020-02-01T00:00:00.000-2020-05-08T00:00:00.000" => {
             :covid_deaths => 44016,
         :influenza_deaths => 5971
     }
 }
+```
+
+Provisional Covid Deaths source 3 from hc4f-j6nb
+```
 {
     "2020-02-01T00:00:00.000-2020-05-08T00:00:00.000" => {
             :covid_deaths => 310690,
         :influenza_deaths => 52389
     }
 }
+```
+
+
+Provisional COVID-19 Death Counts by Sex, Age, in the U.S. (source 4) from 9bhg-hcku
 Statistics for death type: influenza
+```
 All Sexes
 	Under 1 year                   => 11
 	1-4 years                      => 33
@@ -127,3 +197,4 @@ Unknown
 
 covid_deaths               => 176063
 influenza_deaths           => 23884
+```
