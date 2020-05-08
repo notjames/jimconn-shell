@@ -55,9 +55,11 @@ status and so I can't make any reliable assumptions yet.
 # Obvious conclusions
 The only conclusion I can make so far is that the numbers between the sources
 don't add up...at all. By "add up," I don't mean mathematically. I mean
-logically. The numbers between the sources don't match up. The numbers in these
-sources don't match up to what we're told in the media. Things just aren't
-adding up. So, I need to research that more.
+logically. **The numbers between the API sources don't seem to match up**. These
+numbers don't match up to what we're told by the media. Things just aren't adding
+up. So, I need to research that more.
+
+These mismatches cause me to be very leary.
 
 # Notes
   * These numbers represent the United States only!
@@ -73,7 +75,7 @@ it.
 
 # About the project
 I am not a statistician. I am a software developer. One of the reasons I want
-this to be publically available is so that my work is reviewed and approvied. If
+this to be publically available is so that my work is reviewed and approved. If
 there mistakes, please let me know so I can fix them. I'm seeking review for
 code and method.
 
