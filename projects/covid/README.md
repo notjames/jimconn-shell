@@ -53,7 +53,7 @@ it.
 # About the project
 I am not a statistician. I am a software developer. One of the reasons I want
 this to be publically available is so that my work is reviewed and approved. If
-there mistakes, please let me know so I can fix them. I'm seeking review for
+there are mistakes, please let me know so I can fix them. I'm seeking review for
 code and method.
 
 # Getting this script
