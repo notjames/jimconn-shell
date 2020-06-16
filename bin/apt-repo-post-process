@@ -1,17 +1,18 @@
-#!/bin/bash
-# contributed by @happyskeptic
+buted by @happyskeptic
 # https://askubuntu.com/questions/170348/how-to-create-a-local-apt-repository
 # minor changes made by jimconn.
+# example usage: cd </root/repo/ubuntu> && DISTRO=$(lsb_release -sc) ~/bin/apt-repo-post-process $(pwd)
 set -e
 set -o pipefail
 
 #CONFIG=${1:-/etc/apt/mirror.list}
 #WORKDIR=$(grep -Po 'base_path\s+/.*' "$CONFIG" | awk '{print $2}')
 WORKDIR=$1
-KEYNAME=${KEYNAME:-"CNCT Team"}
-PACKAGE_FILE=${PACKAGE_FILE:-'dists/xenial/main/binary-amd64/Packages'}
+KEYNAME=${KEYNAME:-"587FA355"}
+DISTRO=${DISTRO:-$(lsb_release -sc)}
+PACKAGE_FILE=${PACKAGE_FILE:-"dists/$DISTRO/main/binary-amd64/Packages"}
 PACKAGE_FILE_PATH='main/binary-amd64/Packages'
-RELEASE_FILE=${RELEASE_FILE:-'dists/xenial/Release'}
+RELEASE_FILE=${RELEASE_FILE:-"dists/"$DISTRO"/Release"}
 RELEASE_HEADER_FILE="conf/Release.dist"
 DIST_RELEASE_FILE=${DIST_RELEASE_FILE:-'conf/distributions'}
 
@@ -69,7 +70,10 @@ main()
       }
 
     # Generate the Packages file
-    #dpkg-scanpackages -m . /dev/null > "$PACKAGE_FILE"
+    # if you just need to recreate shas and release file then this can be commented
+    # out but if not run then any new packages added to the repo will not be added.
+    dpkg-scanpackages -m . > "$PACKAGE_FILE"
+
     gzip --keep --force -9 "$PACKAGE_FILE"
     xz -kz --force  "$PACKAGE_FILE"
     bzip2 -k --force "$PACKAGE_FILE"
@@ -90,12 +94,12 @@ main()
     sum_rel sha256sum
 
     # Clearsign the Release file (that is, sign it without encrypting it)
-    [[ -f dists/xenial/InRelease ]] && rm dists/xenial/InRelease
-    #gpg --clearsign --digest-algo SHA512 --default-key "$KEYNAME" -o dists/xenial/InRelease dists/xenial/Release
-    gpg --clearsign -o dists/xenial/InRelease dists/xenial/Release
+    [[ -f dists/"$DISTRO"/InRelease ]] && rm dists/"$DISTRO"/InRelease
+    #gpg --clearsign --digest-algo SHA512 --default-key "$KEYNAME" -o dists/"$DISTRO"/InRelease dists/"$DISTRO"/Release
+    gpg --clearsign -o dists/"$DISTRO"/InRelease dists/"$DISTRO"/Release
 
     # Release.gpg only need for older apt versions
-    # gpg -abs --digest-algo SHA512 --local-user $USER -o Release.gpg Release
+    gpg -abs --digest-algo SHA512 --yes --local-user "$KEYNAME" -o dists/"$DISTRO"/Release.gpg dists/"$DISTRO"/Release
 }
 
 if ! main "$@"; then
