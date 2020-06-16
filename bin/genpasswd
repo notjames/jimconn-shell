@@ -1,0 +1,68 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+bytes=15
+allowed_chars='\w[-_!@#$%\^&*\(\)\[\]]'
+
+usage()
+{
+  echo >&2 """
+
+  Usage: $0 [-n|--numchars <5 <= n <= 30>] [-a|--allowed-chars <allowed characters>] [-h|--help]
+
+  characters defaults to: '$bytes'
+
+  Allowed characters should be zero-space and properly escaped characters
+  for a PCRE evaluation. Current default is: '$allowed_chars'
+
+  Common other patterns are: '\w'       (alphanum only)
+                             '\d'       (numbers only)
+                             '\w[@$%&]' (alphanum with @, $, %, and &)
+
+  """
+}
+
+ while [[ $1 ]]
+  do
+    case $1 in
+      -n|--numchars)
+        shift
+        set -- "$@"
+
+        bytes=$1
+
+        if ! echo "$bytes" | grep -qP '^\d+$'; then
+          echo >&2 "Parameter for -n must be a whole number between 5 and 30"
+          usage
+          exit 1
+        fi
+
+        if [[ $bytes -lt 5 ]] || [[ $bytes -gt 30 ]]; then
+          echo >&2 "Parameter for -n must be a whole number between 5 and 30"
+          usage
+          exit 1
+        fi
+      ;;
+      -a|--allowed-chars)
+        shift
+        set -- "$@"
+
+        allowed_chars="$1"
+      ;;
+      -h|--help)
+        usage
+        exit 0
+      ;;
+      *)
+        echo >&2 "Invalid option: '$1'"
+        usage
+        exit 1
+      ;;
+    esac
+
+    shift
+  done
+
+head -1000 /dev/urandom | grep -aoP ''"$allowed_chars"'' | tr -d '\n' | cut -c 1-"$bytes"

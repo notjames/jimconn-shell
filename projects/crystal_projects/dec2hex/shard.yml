@@ -1,0 +1,13 @@
+name: dec2hex
+version: 0.1.0
+
+authors:
+  - Jim Conner <snafu.x@gmail.com>
+
+targets:
+  dec2hex:
+    main: src/dec2hex.cr
+
+crystal: 0.33.0
+
+license: MIT

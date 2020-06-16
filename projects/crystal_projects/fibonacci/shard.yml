@@ -1,0 +1,13 @@
+name: fibonacci
+version: 0.1.0
+
+authors:
+  - Jim Conner <snafu.x@gmail.com>
+
+targets:
+  fib:
+    main: src/fib.cr
+
+crystal: 0.33.0
+
+license: MIT
