@@ -7,3 +7,4 @@ coverage.*
 **.sw*
 .DS_Store**
 **/hex2dec/hex2dec
+.ssh/includes

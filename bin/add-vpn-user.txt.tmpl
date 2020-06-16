@@ -1,0 +1,94 @@
+
+
+
+
+
+Please follow the instruction for creating the CNCT Lab VPN client connection
+
++=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+
+```
+  macOS Client
+
+In this section, we are using an Apple macOS computer as the L2TP client.
+
+1. Add a VPN connection in the network settings.
+
+System Preferences > Network > "+"
+
+Interface: VPN
+VPN Type: PSK L2TP over IPSec
+Service name: VPN (L2TP)
+2. Adjust the newly created L2TP over IPsec interface.
+
+System Preferences > Network > VPN L2TP
+
+Configuration: Default
+Server Address: <OUTSIDE_IP_ADDR>
+Account User Name: ${NEW_VPN_USER}
+
+3. Add the authentication settings.
+
+System Preferences > Network > VPN L2TP > Authentication Settings
+
+User Authentication: ${NEW_VPN_PASSWD}
+Machine Authentication: ${VPNPSK}
+```
+
+for Windows 10, follow:
+  https://help.ubnt.com/hc/en-us/articles/115005445768-UniFi-USG-Configuring-L2TP-Remote-Access-VPN#windows
+
++=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+a decent ssh config for the environment:
+
+Host nuc*.maas
+  StrictHostKeyChecking no
+  UserKnownHostsFile=/dev/null
+  IdentityFile <use private ssh key in 1password for ims-admin>
+  User ubuntu
+  Port 22
+
+Host maas
+  Hostname <ip_addr>
+  IdentityFile <use private ssh key in 1password for ims-admin>
+  Port 22
+  User ubuntu
+
++=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+
+Place the following script in `/etc/ppp/ip-up` and make sure to `chmod 755 /etc/ppp/ip-up`
+
+:FROM HERE
+
+#!/bin/bash
+#
+# this script should be placed in /etc/ppp/ip-up
+# It is run after VPN is started.
+#
+# Need to eval for the correct destination VPN IP before adding routes for it,
+# this is run after every VPN connect..so we need to eval for the server VPN IP
+#
+# The parameters given to the script:
+#
+# $1: The VPN interface (e.g. ppp0)
+# $2: Unknown, blank
+# $3  Unknown, 0
+# $4: IP of the VPN server
+# $5: VPN gateway address
+# $6: Regular (non-vpn) gateway for your lan connections
+#
+# see: https://jms1.net/osx-vpn-routing.shtml
+#
+# SmithTowerLabVPN
+now=$(date +%Y-%m-%d_%Hh%Mm%Ss)
+logfile=/var/log/ip-up.log
+echo "${now} ${0}: 1:${1},2:${2},3:${3},4:${4},5:${5},6:${6}" >> $logfile
+if [ "${5}" == "10.255.255.0" ]; then
+    echo "${now} Adding Routes for SmithTowerLab" >> $logfile
+    <ROUTE1>
+    <ROUTEn>
+fi
+# elif   <next vpn server >
+#
+
+:TO HERE
