@@ -13,13 +13,16 @@ require 'inifile'
 require 'optparse'
 require 'ostruct'
 require 'pathname'
-require 'awesome_print'
+require 'amazing_print'
 require 'pry'
 
 class Super
   class << self
     attr_accessor :data, :client, :now, :source_title, :source_api_id
   end
+end
+
+class HelpException < StandardError
 end
 
 class Config
@@ -40,6 +43,8 @@ class Config
     end
 
     @config
+  rescue HelpException
+    exit 0
   rescue ArgumentError => e
     $stderr.puts('Unable to initialize runtime: %s' % [e])
     return false
@@ -49,6 +54,8 @@ class Config
   end
 
   def parse_cli()
+    exit_on_help = false
+
     OptionParser.new \
     {|opts|
       opts.banner = 'Usage: %s [options]' % [$0]
@@ -87,7 +94,15 @@ class Config
 
         @options.id = v
       }
+
+      opts.on('-h', '--help', 'Prints this help') \
+      {
+        puts opts
+        exit_on_help = true
+      }
     }.parse!
+
+    raise HelpException if exit_on_help
 
     if @options.credfile.nil? && @options.id.nil?
       raise ArgumentError, '--credfile or --id is required.'
@@ -245,8 +260,7 @@ class S4 < Covid
 
   # https://dev.socrata.com/foundry/data.cdc.gov/9bhg-hcku
   def s4
-    response = {}
-    data     = base = {}
+    data     = response = base = {}
     api_id   = '9bhg-hcku'
     response = @client.get(api_id, :state => 'United States')
     period   = '%s-%s' % [response.body.first['start_week'], @now]
@@ -275,8 +289,11 @@ class S4 < Covid
         base[:detail][obj[:sex]][obj[:age_group]][:influenza] = 0
       end
 
-      base[:totals][:covid_deaths]                          += obj['covid_19_deaths'].to_i
-      base[:totals][:influenza_deaths]                      += obj['influenza_deaths'].to_i
+      if obj['sex'] == 'All' and obj['age_group'] == 'All Ages'
+        base[:totals][:covid_deaths]                        += obj['covid_19_deaths'].to_i
+        base[:totals][:influenza_deaths]                    += obj['influenza_deaths'].to_i
+      end
+
       base[:detail][obj[:sex]][obj[:age_group]][:covid19]   += obj[:covid_19_deaths].to_i
       base[:detail][obj[:sex]][obj[:age_group]][:influenza] += obj[:influenza_deaths].to_i
     }
@@ -318,8 +335,9 @@ end
 
 
 # initialize Config options and read in credentials
-unless (c = Config.new)
+unless c = Config.new
   $stderr.puts 'ended with error(s)'
+  exit 1
 end
 
 flu    = Flu.new(c)
