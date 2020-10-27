@@ -50,6 +50,10 @@ Jim Conner
 Likely. This project is still in heavy development when I have time to work on
 it.
 
+Found a large bug in the output for covid and flu deaths of the last source (s4)
+where I was erroneously adding totals which bloated that source's death values
+significantly. This has now been fixed as of July 28, 2020.
+
 # About the project
 I am not a statistician. I am a software developer. One of the reasons I want
 this to be publically available is so that my work is reviewed and approved. If
@@ -244,8 +248,8 @@ Unknown
 	All ages                       => 1
 
 
-covid_deaths               => 176063
-influenza_deaths           => 23884
+covid_deaths               => 176063  (should have read 44016 -- fixed 7/28/2020)
+influenza_deaths           => 23884   (should have read 5971  -- fixed 7/28/2020)
 ```
 
 # References
