@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+WORK_BR='ahr'
+FEATURE_BR=${1:-$(git symbolic-ref --short HEAD)}
+
+echo 'It is assumed that your origin/master is already correctly set to an upstream'
+echo 'If it is not, then press ctrl+c and do so with `g push -u origin <branch>`' a
+read -rp 'continue? ctrl+c or any other key...' a
+
+if ! git co master; then
+  echo >&2 'Cannot checkout master. Quitting.'
+  exit 1
+fi
+
+if ! git reset --hard && g fetch --all && g rebase upstream/master && g push --force-with-lease; then
+  echo >&2 'Unable to bring origin/master into sync with upstream. Quitting'
+  exit 1
+fi
+
+if ! git checkout -b "$WORK_BR" master; then
+  echo >&2 'Unable to check out work branch. Quitting'
+  exit 1
+fi
+
+if ! git merge --squash "$FEATURE_BR"; then
+  echo >&2 'Unable to merge-squash feature branch. Quitting'
+  exit 1
+fi
+
+if ! git commit -am 'chore(build): squash work merge'; then
+  echo >&2 'Unable to commit squashed work in work branch. Quitting'
+  exit 1
+fi
+
+if ! git co "$FEATURE_BR"; then
+  echo >&2 'Unable to re-check out feature branch. Quitting'
+  exit 1
+fi
+
+if ! git reset --hard "$WORK_BR"; then
+  echo >&2 'Unable to reset work branch.  Moving on. You will have to perform house cleaning manually.'
+  echo >&2 "git reset --hard '$WORK_BR'"
+fi
+
+if ! git push --force-with-lease; then
+  echo >&2 'Unable to push squashed commit to origin/master. You will have to push manually.'
+  echo >&2 'git push --force-with-lease'
+fi
+
+if ! git br -D "$WORK_BR"; then
+  echo >&2 'Unable to delete work branch. You will have to delete it manually'
+  echo >&2 "git branch -D '$WORK_BR'"
+fi
+
+echo 'done'

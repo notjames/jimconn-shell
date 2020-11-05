@@ -1,0 +1,13 @@
+#!/bin/bash
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+if [[ "$CURRENT_BRANCH" -ne "master" ]]; then
+  echo >&2 "Not on master. Stopping."
+  exit 1
+fi
+
+git fetch --all
+git reset --hard upstream/master
+git push --force-with-lease
+

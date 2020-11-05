@@ -1,0 +1,54 @@
+#!/bin/bash
+# build with:
+# docker build -t maas-cli:latest /path/to/osx-maas
+# copy this script to a directory in your $PATH
+# make sure it's mode 755
+#
+# raw docker to login
+# docker run -it -v $HOME:/opt/maas_env  maas-cli:latest maas login <PROFILE> http://192.168.2.24:5240/MAAS/api/2.0/  <maas token>
+# or do this after you've followed instructions from above:
+# maas login <PROFILE> http://192.168.2.24:5240/MAAS/api/2.0/  <maas token>
+
+set -eo pipefail
+
+CONTAINER_ROOT='/root'
+CONTAINER_IMAGE='maas-cli:latest'
+REQS=(ggrep docker)
+
+check_reqs()
+{
+  local good
+  good=1
+
+  for r in ${REQS[@]}; do
+    if ! which "$r" >/dev/null; then
+      echo >&2 "'$r' is required for this script to work properly"
+      good=0
+    fi
+  done
+
+  if [[ "$good" == 1 ]]; then
+    grep=$(which ggrep)
+    docker=$(which docker)
+
+    return 0
+  fi
+
+  return 1
+}
+
+check_build()
+{
+  $docker images --format '{{.ID}}' "$CONTAINER_IMAGE" | $grep -Pq '^\w'
+}
+
+if ! check_reqs; then
+  exit 1
+fi
+
+if ! check_build; then
+  echo >&2 'You need to build the container: docker build -t "$CONTAINER_IMAGE" /your/path/to/osx-maas'
+  exit 1
+fi
+
+$docker run -it -v "$HOME":"$CONTAINER_ROOT" -w "$CONTAINER_ROOT${PWD/$HOME/}"/ "$CONTAINER_IMAGE" /usr/bin/maas "$@"

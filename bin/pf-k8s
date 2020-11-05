@@ -1,0 +1,7 @@
+#!/bin/bash
+
+API_POD=ims-api-76f65bc4dd-ftq7j
+
+kubectl --kubeconfig=$KUBECONFIG --address 127.0.0.1 port-forward -n ims "$API_POD" 9051:9051 &
+kubectl --kubeconfig=$KUBECONFIG --address 127.0.0.1 port-forward -n ims "$API_POD" 9052:9052 &
+
