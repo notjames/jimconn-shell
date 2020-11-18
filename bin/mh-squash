@@ -1,0 +1,44 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+feature_branch=$1
+mh="$feature_branch"-mh
+
+if [[ -z "$feature_branch" ]]; then
+  echo >&2 'Need the feature branch to merge'
+  exit 1
+fi
+
+if ! git checkout -b "$mh" upstream/master; then
+  echo >&2 'Could not checkout feature branch. Git exit code was: '$?
+  exit 1
+fi
+
+if ! git merge --squash "$feature_branch"; then
+  echo >&2 'Squash failed. Exit code was: '$?
+  exit 1
+fi
+
+if ! git commit -m 'mh commit.'; then
+  echo >&2 'Git commit failed. Git exit code was: '$?
+  exit 1
+fi
+
+if ! git checkout "$feature_branch"; then
+  echo >&2 'Unable to co feature branch. Git exit code: '$?
+  exit 1
+fi
+
+if ! git reset --hard "$mh"; then
+  echo >&2 'Unable to reset work branch. Git exit code: '$?
+fi
+
+if ! git branch -D "$mh"; then
+  echo >&2 'Unable to delete work branch. Git exit code: '$?
+  exit 1
+fi
+
+echo 'All done.'
+echo 'You need to push using: git push --force-with-lease '

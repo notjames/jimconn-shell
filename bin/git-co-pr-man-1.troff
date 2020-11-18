@@ -1,0 +1,27 @@
+.\" Manpage for git co-pr.
+.\" Contact snafuxnj@yahoo.com.in to correct errors or typos.
+.TH man 1 "24 July 2020" "1.0" "git co-cr man page"
+.SH NAME
+git co-or \- git checkout pr 
+.SH SYNOPSIS
+  git co-pr --pr-number <int> --pr-owner <PR Owner name> [-h|--help]
+.SH DESCRIPTION
+Open requested PR in a new branch in your local repo.
+.SH OPTIONS
+The nuseradd does not take any options. However, you can supply username.
+.SH EXAMPLES
+  git co-pr -n 121 -o username
+
+  git co-pr -pr-number 121 -pr-owner username
+
+  git co-pr --help
+
+  Note that "username" is really an arbitrary string. One can
+  use any string for this option, but use of username helps with
+  tracking the owner of the PR.
+.SH SEE ALSO
+git(8)
+.SH BUGS
+No known bugs.
+.SH AUTHOR
+Jim Conner (snafuxnj@yahoo.com)
