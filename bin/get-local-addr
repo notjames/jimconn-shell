@@ -1,0 +1,37 @@
+#!/bin/bash
+
+mac_addr()
+{
+  reqed=(ggrep ifconfig)
+  check_reqed
+
+  if=$(netstat -rn | ggrep -P '^default.*UGS' | awk '{print $4}' | head -n 1)
+  ifconfig "$if" | ggrep -Po 'inet\s+(\d{1,3}\.){3}\d{1,3}' | awk '{print $2}'
+}
+
+linux_addr()
+{
+  reqed=(grep ip)
+  check_reqed
+
+  if=$(netstat -rn | grep -P '^0\.0\.0\.0' | awk '{print $8}' | head -n 1)
+  ip addr show "$if" | grep -Po 'inet\s+(\d{1,3}\.){3}\d{1,3}' | awk '{print $2}'
+}
+
+check_reqed()
+{
+  for exists in "${reqed[@]}"; do
+    if ! command -v which "$exists" > /dev/null 2>&1; then
+      echo >&2 "Required command: $exists is missing. Cannot continue."
+      return 1
+    fi
+  done
+}
+
+case $(uname -s) in
+  Linux) linux_addr;;
+  Darwin) mac_addr;;
+  *) echo >&2 "I don't know this OS. Please set variable manually"
+  ;;
+esac
+
