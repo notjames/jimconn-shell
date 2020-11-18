@@ -1,0 +1,64 @@
+#!/bin/bash
+# checkout a PR
+
+usage()
+{
+  local command
+
+  command='git co-pr'
+
+  cat << EOS
+Usage: 
+  $command --pr-number <int> --pr-owner <PR Owner name> [-h|--help]
+
+Open requested PR in a new branch in your local repo.
+
+Example:
+  git co-pr -n 121 -o username
+
+  git co-pr -pr-number 121 -pr-owner username
+
+  git co-pr --help
+
+  Note that "username" is really an arbitrary string. One can
+  use any string for this option, but use of username helps with
+  tracking the owner of the PR.
+EOS
+
+}
+
+main()
+{
+  while [[ "$1" ]]; do
+    case $1 in
+      -h|--help)
+        usage
+        exit 1
+      ;;
+      -n|--pr-number)
+        # PR Number
+        shift
+        PRNUM=$1
+      ;;
+      -o|--pr-owner)
+        # PR Owner
+        shift
+        PROWNER=$1
+      ;;
+      *)
+        echo >&2 "Unrecognized argument: $1"
+        usage
+        exit 1
+      ;;
+    esac
+    shift
+  done
+
+  # branch name we generate.
+  BRNM="$PROWNER"-"$PRNUM"
+
+  git fetch upstream pull/"$PRNUM"/head:"$BRNM" && \
+    git checkout "$BRNM"
+}
+
+main "$@"
