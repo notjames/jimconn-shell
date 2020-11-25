@@ -138,6 +138,19 @@ maas-all-custom-images()
   maas jimconn boot-resources read | jq -Mr '[.[] | select(.id > 300) | .name | select(contains("/") | not) | .]'
 }
 
+get_bat() {
+  if [[ $# -eq 1 && $1 =~ ^\.\. ]]; then
+    # handle ../../path when single arg
+    echo 'docker run -it --rm -e BAT_THEME -e BAT_STYLE -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" -v "$(cd "$(dirname "$1")"; pwd):/myapp" danlynn/bat $(basename "$1")"'
+  elif [[ $# -eq 1 && $1 =~ ^\/ ]]; then
+     # handle ~/path -or- actual absolute paths when single arg
+     echo 'docker run -it --rm -e BAT_THEME -e BAT_STYLE -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" -v "$(dirname "$1"):/myapp" danlynn/bat $(basename "$1")'
+  else
+    # handle most everything else
+    echo 'docker run -it --rm -e BAT_THEME -e BAT_STYLE -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" -v "$(pwd):/myapp" danlynn/bat "$@"'
+  fi
+}
+
 when()
 {
   local the_test
@@ -147,12 +160,18 @@ when()
   cmd=$*
 
   while true; do
-    if test "$the_test"; then
+    if test ! "$the_test"; then
       $cmd
       return 0
     fi
     sleep 1
   done
+}
+
+## blsc env
+ac()
+{
+  export $(awsctx --profile $1 --region $2)
 }
 
 alias mmid=maas_machine_id
@@ -183,9 +202,9 @@ fi
 
 alias tmux='tmux -2'
 
-gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-f
+#gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-f
 #alias gcloud='gcloud project=jimtest-170020'
-alias gcloud='gcloud --project=k8s-work'
+#alias gcloud='gcloud --project=k8s-work'
 
 alias vi='vi -p'
 alias hd='helm del --purge'
@@ -223,11 +242,10 @@ alias gb='get_git_branch'
 alias whatsmyip='curl -sL http://api.myip.com | jq -Mr .ip'
 alias preview="fzf --preview 'bat --color \"always\" {}'"
 alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
-[ -x "$($which bat)" ] && \
-  {
-    alias less="\$($which bat) --color=auto --theme=TwoDark"
-    alias cat="\$($which bat) --color=auto --theme=TwoDark"
-  }
+
+# bat - cat with wings
+alias less="$(get_bat --color=auto --theme=TwoDark)"
+alias cat="$(get_bat --color=auto --theme=TwoDark)"
 
 # add support for ctrl+o to open selected file in VS Code
 export FZF_DEFAULT_OPTS="--bind='ctrl-o:execute(code {})+abort'"
