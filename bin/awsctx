@@ -1,0 +1,108 @@
+#!/bin/bash
+
+session="$HOME/.aws/cli/last_session.json"
+aws_dir="$HOME/.aws"
+ses_dir="${session%/*}"
+aws_config=""
+override=0
+
+abort()
+{
+  msg="$*"
+  echo >&2 "$msg"
+  exit 1
+}
+
+usage()
+{
+  cat <<EOM
+  Usage: $0 --profile <profile name> --in <region> [--help|-h]
+
+  --profile: profile name
+  --in     : region
+  --help   : this help message
+EOM
+  exit 1
+}
+
+recover_session()
+{
+  if test -f "$session"; then
+    IFS=':' read -r AWS_PROFILE AWS_REGION \
+      < <(jq -Mr '. | @sh "\(.AWS_PROFILE):\(.AWS_REGION)"' "$session" | tr -d "'")
+
+    [[ "$AWS_PROFILE" == "null" ]] && unset AWS_PROFILE
+    [[ "$AWS_REGION" == "null" ]] && unset AWS_REGION
+
+    AWS_PROFILE=${profile:-$AWS_PROFILE}
+    AWS_REGION=${region:-$AWS_REGION}
+  fi
+}
+
+store_session()
+{
+  AWS_PROFILE=${AWS_PROFILE:-$profile} AWS_REGION=${AWS_REGION:-$region}
+
+  if [[ -z "$AWS_PROFILE" ]] || [[ -z "$AWS_REGION" ]]; then
+    abort "No former session exists and either --profile and/or"\
+          "--region were not specified"
+  fi
+
+  mkdir -p "$ses_dir" && \
+  jo AWS_PROFILE="$AWS_PROFILE" AWS_REGION="$AWS_REGION" > "$session"
+}
+
+aws_config()
+{
+  [[ -e "$aws_dir"/config ]] && \
+    aws_config="$aws_dir"/config
+  [[ -z "$aws_config" ]] && [[ -e "$aws_dir"/credentials ]] && \
+    aws_config="$aws_dir"/credentials
+  [[ -z "$aws_config" ]] && \
+    abort "No aws config or credential file found"
+}
+
+if [[ -z "$*" ]]; then
+  aws_config
+  grep -P '^\[\w+' "$aws_config" | perl -ne 's#.*?(\w+(-\w+)?)\]#$1#g;print'
+
+  echo """
+
+Current context is:
+$(printenv | grep -P 'AWS_(REGION|PROFILE)')
+  """
+  exit
+fi
+
+while test -n "$*"; do
+  case "$1" in
+    -r|--recover-override|--override)
+      # always recover from last session even if
+      # --profile and/or --region are specified
+      shift; override=1
+    ;;
+    -p|--profile)
+      shift; profile=$1
+    ;;
+    -i|--in|--region)
+      shift; region=$1
+    ;;
+    -h|--help)
+      usage
+    ;;
+    *)
+      shift
+    ;;
+  esac
+  shift
+done
+
+if [[ "$override" == 1 ]]; then
+  unset profile region
+fi
+
+recover_session
+store_session
+
+echo AWS_PROFILE="$AWS_PROFILE" AWS_REGION="$AWS_REGION"
+export AWS_PROFILE="$AWS_PROFILE" AWS_REGION="$AWS_REGION"
