@@ -1,0 +1,21 @@
+#!/bin/bash
+
+bat_opts='--color=auto --theme=TwoDark'
+
+if [[ $# -eq 1 && $1 =~ ^\.\. ]]; then
+  # handle ../../path when single arg
+  docker run -it --rm -e BAT_THEME -e BAT_STYLE \
+  -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" \
+  -v "$(cd "$(dirname "$1")" || true; pwd):/myapp" danlynn/bat "$bat_opts" "$(basename "$1")"
+elif [[ $# -eq 1 && $1 =~ ^\/ ]]; then
+   # handle ~/path -or- actual absolute paths when single arg
+   docker run -it --rm -e BAT_THEME -e BAT_STYLE \
+    -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" \
+    -v "$(cd "$(dirname "$1")" || true; pwd):/myapp" danlynn/bat "$bat_opts" "$(basename "$1")"
+else
+  # handle most everything else
+  docker run -it --rm -e BAT_THEME -e BAT_STYLE \
+  -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" \
+  -v "$(cd "$(dirname "$1")" || true; pwd):/myapp" danlynn/bat "$bat_opts" "$(basename "$1")"
+fi
+
