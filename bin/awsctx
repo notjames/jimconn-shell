@@ -64,7 +64,7 @@ aws_config()
 
 if [[ -z "$*" ]]; then
   aws_config
-  grep -P '^\[\w+' "$aws_config" | perl -ne 's#.*?(\w+(-\w+)?)\]#$1#g;print'
+  grep -P '^\[\w+' "$aws_config" | perl -ne 's#\[profile ([a-zA-Z0-9-]+)\]#$1#g;print'
 
   echo """
 
