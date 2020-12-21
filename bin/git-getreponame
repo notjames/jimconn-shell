@@ -1,0 +1,15 @@
+#!/bin/bash
+
+if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  exit 1
+fi
+
+repo=$(git config --get remote.origin.url)
+repo=${repo##*/}
+repo=${repo/.git/}
+
+if [[ -z "$repo" ]]; then
+  exit 0
+fi
+
+echo "$repo"
