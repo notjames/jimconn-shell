@@ -1,0 +1,89 @@
+format = """
+[└>](bold green)\
+$username\
+$hostname\
+$shlvl\
+$directory\
+${custom.git_reponame}\
+$git_branch\
+$git_commit\
+$git_state\
+$git_status\
+$aws\
+$kubernetes\
+$nix_shell\
+$memory_usage\
+$openstack\
+$env_var\
+$cmd_duration\
+$custom\
+$line_break\
+$lua\
+$jobs\
+$battery\
+$time\
+$status\
+$character
+"""
+
+[directory]
+format = "[$path]($style)[$read_only]($read_only_style) "
+
+[env_var]
+format = "・with [$env_value]($style) "
+
+[aws]
+format = '・on [$symbol$profile(\($region\))]($style) '
+style = "bold blue"
+symbol = "🅰 "
+
+[aws.region_aliases]
+us-west-1 = "N.CA"
+us-west-2 = "OR"
+us-east-1 = "VA"
+us-east-2 = "OH"
+
+[terraform]
+format = "・[🏎💨 $version$workspace]($style) "
+
+[docker_context]
+format = "・via [🐋 $context](blue bold)"
+
+[nix_shell]
+disabled = true
+impure_msg = "[impure shell](bold red)"
+pure_msg = "[pure shell](bold green)"
+format = '・via [☃️ $state( \($name\))](bold blue) '
+
+[kubernetes]
+format = '・[⛵ $context ](bg:red bold bright-white)[\($namespace\)](yellow) '
+disabled = false
+
+[kubernetes.context_aliases]
+"arn:aws:eks:us-west-2:429863676324:cluster/alpha-b" = "dev"
+"arn:aws:eks:us-west-2:429863676324:cluster/dragons" = "dragons"
+"arn:aws:eks:us-west-2:429863676324:cluster/utility" = "utility"
+"arn:aws:eks:us-east-1:184966437322:cluster/atreus" = "atreus"
+"arn:aws:eks:us-east-1:184966437322:cluster/stg1" = "stg1"
+"arn:aws:eks:us-east-1:308171672556:cluster/a-us" = "US-PROD(US)"
+"arn:aws:eks:us-east-1:184966437322:cluster/stg3" = "stg3"
+"arn:aws:eks:us-east-1:308171672556:cluster/a-avaya" = "PROD(avaya)"
+"arn:aws:eks:us-east-1:308171672556:cluster/a-disney" = "PROD(disney)"
+"arn:aws:eks:us-east-1:308171672556:cluster/a-ford" = "PROD(ford)"
+"arn:aws:eks:us-east-1:308171672556:cluster/a-jnj" = "PROD(jnj)"
+"arn:aws:eks:us-east-1:308171672556:cluster/a-marvelstudios" = "PROD(marvelstudios)"
+"arn:aws:eks:us-east-1:308171672556:cluster/us" = "PROD(US)"
+
+#[git_status]
+#format = "・([$all_status$ahead_behind]($style) )"
+
+[custom.git_reponame]
+format = '・in [$symbol$output]($style) '
+description = "Show the git-url (hopefully matches the directory of the project you're working in)"
+command = "git getreponame"
+when = "git getreponame"
+symbol = "🐱"
+style = "bold bright-white"
+
+[time]
+disabled = false
