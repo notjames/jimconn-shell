@@ -59,3 +59,25 @@ export CURL_HOME COOKIES
 
 # temporary
 #export SOPS_KMS_ARN=arn:aws:kms:us-west-2:429863676324:key/4b2c5901-43aa-4e1c-b14d-bb797a476939
+
+show_cluster()
+{
+  AWS_PROD_USER=xxxxxxxxxxxxxxx
+  AWS_PPROD_USER=xxxxxxxxxxxxxxx
+  cluster="$(\kubectl config current-context)"
+  if [[ "$cluster" =~ aws ]]; then
+    shortened_cluster="$(echo "$cluster" | cut -d : -f 6)"
+  fi
+  figlet -w200 -f pagga "$shortened_cluster"
+
+  if [[ "$cluster" =~ $AWS_PROD_USER ]]; then
+    echo ' PRODUCTION! ' | toilet --filter border:metal -w200 -t --metal --font mono9
+  fi
+
+  if [[ "$cluster" =~ $AWS_PPROD_USER ]]; then
+    echo ' PRE-PROD!!! ' | toilet --filter border:metal -w200 -t --gay --font mono9
+  fi
+}
+
+# and force you to set the context per session
+show_cluster

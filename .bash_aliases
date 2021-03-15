@@ -1,7 +1,10 @@
 #!/bin/bash
 
 which=$(command -v which)
-AWS_PROD_USER=308171672556
+# real prod
+AWS_PROD_USER=xxxxxxxxxxxxx
+# test prod
+#AWS_PROD_USER=xxxxxxxxxxxxx
 
 get_git_branch()
 {
@@ -181,20 +184,88 @@ show_clusters()
     done
 }
 
+each_cluster()
+{
+  local amz_cmd
+  amz_cmd=$"$*"
+
+  \cat <<E
+  awsctx | \
+    grep -P '^gen3-' | \
+    while read -r acct; do
+      unset clusters
+      regions=(us-east-1 us-east-2 us-west-1 us-west-2)
+      for r in "\${regions[@]}"; do
+        ac "\$acct" "\$r"
+        $amz_cmd
+      done
+    done
+E
+}
+
+amz_lookup_acct_by_amz_id()
+{
+  id="$1"
+  "$HOME"/bin/get-aws-acct-by-id "$id"
+}
+
 update_cluster_kubeconfigs()
 {
+  local dts changed kconfig
+
+  dts="$(date -Iseconds)"
+  changed=0
+  kconfig=${KUBECONFIG:=$HOME/.kube/config}
+  SAVE_AWS_PROFILE="$AWS_PROFILE"
+  SAVE_AWS_REGION="$AWS_REGION"
+  SAVE_CONTEXT="$(\kubectl config get-context)"
+
+  # prune non-existent clusters from config
+  while read -r cluster; do
+    IFS=':' read -r _ _ _ region amz_id cluster_name <<< "$cluster"
+    acct=$(amz_lookup_acct_by_amz_id "$amz_id")
+    cluster_name=${cluster_name/cluster\//}
+    ac "$acct" "$region"
+    if ! aws eks describe-cluster --name "$cluster_name" --query "cluster.name" --output text >/dev/null 2>&1; then
+      if [[ $changed == 0 ]]; then
+        if ! cp "$kconfig" "$kconfig.$dts"; then
+          echo >&2 'Unable to make backup copy of k8s config, so stopping'
+          return 1
+        fi
+        ((changed++))
+      fi
+      echo "$cluster no longer exists, so pruning..."
+      \kubectl config delete-cluster "$cluster"
+      \kubectl config delete-context "$cluster"
+    fi
+  done <<< "$(\kubectl config get-clusters | grep -Pv NAME)"
+
   awsctx | \
     grep -P '^gen3-' | \
     while read -r acct; do
       regions=(us-east-1 us-east-2 us-west-1 us-west-2)
       for r in "${regions[@]}"; do
-        echo "$acct $r"
+        echo "Checking for new clusters in: $acct $r"
         ac "$acct" "$r"
-        for cluster in $(aws eks list-clusters --query "not_null(clusters[])" --output text); do
-          aws eks update-kubeconfig --name "$cluster"
-        done
+        clusters="$(aws eks list-clusters --query "not_null(clusters[])" --output text)"
+        if [[ -n "$clusters" ]]; then
+          if [[ $changed == 0 ]]; then
+            if ! cp "$kconfig" "$kconfig.$dts"; then
+              echo >&2 'Unable to make backup copy of k8s config, so stopping'
+              return 1
+            fi
+            ((changed++))
+          fi
+
+          for cluster in $clusters; do
+            aws eks update-kubeconfig --name "$cluster"
+          done
+        fi
       done
     done
+    # shellcheck disable=SC2046
+    export $(awsctx "$SAVE_AWS_PROFILE" "$SAVE_AWS_REGION")
+    kubectx "$SAVE_CONTEXT"
 }
 
 alias mmid=maas_machine_id
@@ -250,37 +321,38 @@ k-check()
 {
   # function to alias kubectl
   cmd="$*"
-  current_context=$(kubectl config current-context)
+  current_context=$(\kubectl config current-context)
 
-  if ! echo "$current_context" | grep -q "$AWS_PROD_USER"; then
-    return 0
-  fi
-
-  if echo "$cmd" | grep -Pq '\s*apply'; then
-    echo "$(tput setaf 7)$(tput setab 1)THIS IS PROD!! Press ctrl+c to abort! $(tput sgr0)"
+  if echo "$current_context" | grep -q "$AWS_PROD_USER" && \
+     echo "$cmd" | grep -Pq '\s*(apply|delete|edit|patch|replace|drain|cordon|rollout|scale|expose|uncordon|taint|drain) '; then
+    echo -n "$(tput setaf 7)$(tput setab 1)WARNING: THIS IS PROD!! Press ctrl+c to abort! $(tput sgr0)"
     read -r _
-    kubectl "$cmd"
   fi
+
+  # shellcheck disable=SC2086
+  \kubectl $cmd
 }
 
-alias k='k-check'
-alias kg='kubectl get -o wide'
-alias kga='kubectl get -o wide --all-namespaces'
-alias kgj='kubectl get -o json'
-alias kgns="kubectl config view --minify -o 'jsonpath={..namespace}'"
+k-warning()
+{
+  echo -n "$(tput setaf 7)$(tput setab 1)YOU ARE TRYING TO USE THE REAL KUBECTL!!! Use \\kubectl!$(tput sgr0)"
+}
+
 # get pod events
 kgpe()
 {
-  kubectl get events -o wide --field-selector involvedObject.name="$1"
+  \kubectl get events -o wide --field-selector involvedObject.name="$1"
 }
+
 # get pod by phase
 kgps()
 {
-  kubectl get pods -o wide --field-selector status.phase="$1"
+  \kubectl get pods -o wide --field-selector status.phase="$1"
 }
+
 kgpc()
 {
-  kg po "$1" -o jsonpath='{.status.conditions[*].message}'
+  \kubectl get -o wide po "$1" -o jsonpath='{.status.conditions[*].message}'
 }
 
 proj()
@@ -288,7 +360,14 @@ proj()
   cd "$HOME"/projects/src/"$*" || return
 }
 
-alias kd='kubectl describe'
+alias k='k-check'
+alias kg='\kubectl get -o wide'
+alias kga='\kubectl get -o wide --all-namespaces'
+alias kgj='\kubectl get -o json'
+alias kgd='\kubectl describe'
+alias kgns='\kubectl config view --minify -o "jsonpath={..namespace}"'
+alias kubectl='k-warning'
+
 alias gb='get_git_branch'
 
 #alias k2='kubectl --kubeconfig=/home/jimconn/.kraken/cyklops-superior/admin.kubeconfig'
@@ -305,8 +384,8 @@ alias preview="fzf --preview 'bat --color \"always\" {}'"
 alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
 
 # bat - cat with wings
-alias less='$HOME/bin/dbat'
-alias cat='$HOME/bin/dbat'
+#alias less='$HOME/bin/dbat'
+#alias cat='$HOME/bin/dbat'
 
 [[ -n "$COOKIES" ]] && alias curl='curl -b $COOKIES -c $COOKIES'
 # add support for ctrl+o to open selected file in VS Code
