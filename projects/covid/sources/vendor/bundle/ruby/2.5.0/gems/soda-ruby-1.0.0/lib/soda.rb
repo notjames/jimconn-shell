@@ -1,0 +1,1 @@
+require 'soda/client'
