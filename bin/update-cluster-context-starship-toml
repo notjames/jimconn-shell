@@ -1,0 +1,130 @@
+#!/usr/bin/env ruby
+
+require 'yaml'
+require 'inifile'
+require 'toml-rb'
+require 'amazing_print'
+require 'recursive-open-struct'
+
+TOML_FILE = File.join(ENV['HOME'],'.config','starship.toml')
+INI_FILE  = File.join(ENV['HOME'],'.aws','config')
+KUBE_CFG  = File.join(ENV['HOME'],'.kube','config')
+
+SUB_ACCT_ENV_MAP  = {
+                      'xxxxxxxxxxx': 'development',
+                      'xxxxxxxxxx1': 'preprod',
+                      'xxxxxxxxxx2': 'production',
+                    }
+
+# read contexts from ~/.kube/config
+# add contexts to starship.toml
+#   -- each context = shortened thing
+class Configs
+  attr_accessor :toml
+  def initialize
+    @toml = nil
+  end
+
+  def read_toml()
+    @toml = TomlRB.load_file(TOML_FILE)
+  end
+
+  def toml_contexts()
+    return @toml
+  end
+
+  def read_kubeconfig()
+    RecursiveOpenStruct.new(YAML.load_file(KUBE_CFG)).contexts.map \
+    {|context|
+      context['context']['cluster']
+    }.uniq
+  end
+
+  def read_ini()
+    IniFile.load(INI_FILE).to_h
+  end
+end
+
+class Arns
+  attr_accessor :arns, :role_map
+
+  def initialize(arns)
+    @role_map = {}
+    @arns     = arns
+  end
+
+  def to_h(arn)
+    region, k, v = arn.split(/:/)[3..5]
+   (@arns_hash[k] ||= []) << (v.split(/\//)[1])
+    @role_map[k] = region
+  end
+
+  def each_to_h()
+    @arns_hash = {}
+
+    if @arns.is_a? String
+      self.to_h(@arns)
+    end
+
+    if @arns.is_a? Array
+      @arns.each\
+      {|arn|
+        self.to_h(arn)
+      }
+    end
+    @arns_hash
+  end
+
+  def self.make_alias(arn)
+    k, v = arn.split(/:/)[4,5]
+    env = SUB_ACCT_ENV_MAP[k.to_sym]
+    if env.nil?
+      $stderr.puts 'SUB_ACCT_ENV_MAP is missing a sub account!'
+      env = 'missing_sub'
+    end
+
+    '(%s) %s' % [env.upcase, v.split(/\//)[1]]
+  end
+end
+
+class Ini
+  def map_accounts
+    mapped_accounts = {}
+    @ini_in.map \
+    {|k, role|
+      key = k.gsub(/^profile /,'')
+      parsed = super.to_h(role['role_arn'])
+      mapped_accounts[key] = parsed.keys.first
+    }
+    mapped_accounts
+  end
+end
+
+class Parser
+  attr_accessor :role_map, :arns_hash
+  attr_reader :toml_in, :raw_ini_in, :ini_in, :ini_in_mapped, :toml_in_parsed,
+              :toml_out, :mapped_accounts
+
+  def initialize
+    parse
+  end
+
+  def parse
+    @ini_in         = read_ini
+    @ini_in_mapped  = map_accounts
+    @toml_in_parsed = read_toml
+  end
+end
+
+kube_contexts = Configs.new.read_kubeconfig
+toml_contexts = Configs.new.read_toml
+
+toml_contexts['kubernetes']['context_aliases'] = {}
+
+kube_contexts.each \
+{|kc|
+  toml_contexts['kubernetes']['context_aliases'][kc] = Arns.make_alias(kc)
+}
+
+
+File.write(TOML_FILE, TomlRB.dump(toml_contexts), mode: 'w')
