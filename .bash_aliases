@@ -2,9 +2,9 @@
 
 which=$(command -v which)
 # real prod
-AWS_PROD_USER=xxxxxxxxxxxxx
+AWS_PROD_USER=xxxxxxxxxxxx
 # test prod
-#AWS_PROD_USER=xxxxxxxxxxxxx
+#AWS_PROD_USER=xxxxxxxxxxxx
 
 get_git_branch()
 {
@@ -218,7 +218,7 @@ update_cluster_kubeconfigs()
   kconfig=${KUBECONFIG:=$HOME/.kube/config}
   SAVE_AWS_PROFILE="$AWS_PROFILE"
   SAVE_AWS_REGION="$AWS_REGION"
-  SAVE_CONTEXT="$(\kubectl config get-context)"
+  SAVE_CONTEXT="$(\kubectl config current-context)"
 
   # prune non-existent clusters from config
   while read -r cluster; do
@@ -263,6 +263,7 @@ update_cluster_kubeconfigs()
         fi
       done
     done
+    $HOME/bin/update-cluster-context-starship-toml
     # shellcheck disable=SC2046
     export $(awsctx "$SAVE_AWS_PROFILE" "$SAVE_AWS_REGION")
     kubectx "$SAVE_CONTEXT"
