@@ -10,9 +10,9 @@ TOML_FILE = File.join(ENV['HOME'],'.config','starship.toml')
 KUBE_CFG  = File.join(ENV['HOME'],'.kube','config')
 
 SUB_ACCT_ENV_MAP  = {
-                      '429863676324': 'development',
-                      '184966437322': 'preprod',
-                      '308171672556': 'production',
+                      'xxxxxxxxxx': 'development',
+                      'xxxxxxxxxxx': 'preprod',
+                      'xxxxxxxxxxxx': 'production',
                     }
 
 # read contexts from ~/.kube/config
