@@ -1,6 +1,7 @@
 #!/bin/bash
 
 which=$(command -v which)
+AWS_PROD_USER=308171672556
 
 get_git_branch()
 {
@@ -80,7 +81,7 @@ yt()
 
   if cd "$d"
   then
-    youtube-dl --video-format mp4 --add-metadata -ct "$*"
+    youtube-dl -f mp4 --add-metadata -c "$*"
     fix_fsp && (cd - || true)
   else
     echo >&2 "unable to chdir $d"
@@ -138,19 +139,6 @@ maas-all-custom-images()
   maas jimconn boot-resources read | jq -Mr '[.[] | select(.id > 300) | .name | select(contains("/") | not) | .]'
 }
 
-get_bat() {
-  if [[ $# -eq 1 && $1 =~ ^\.\. ]]; then
-    # handle ../../path when single arg
-    echo 'docker run -it --rm -e BAT_THEME -e BAT_STYLE -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" -v "$(cd "$(dirname "$1")"; pwd):/myapp" danlynn/bat $(basename "$1")"'
-  elif [[ $# -eq 1 && $1 =~ ^\/ ]]; then
-     # handle ~/path -or- actual absolute paths when single arg
-     echo 'docker run -it --rm -e BAT_THEME -e BAT_STYLE -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" -v "$(dirname "$1"):/myapp" danlynn/bat $(basename "$1")'
-  else
-    # handle most everything else
-    echo 'docker run -it --rm -e BAT_THEME -e BAT_STYLE -e BAT_TABS -e PAGER -v "$HOME/.config/bat/config:/root/.config/bat/config" -v "$(pwd):/myapp" danlynn/bat "$@"'
-  fi
-}
-
 when()
 {
   local the_test
@@ -171,7 +159,42 @@ when()
 ## blsc env
 ac()
 {
-  export $(awsctx --profile $1 --region $2)
+  # shellcheck disable=SC2046
+  export $(awsctx --profile "$1" --region "$2")
+}
+
+show_clusters()
+{
+  awsctx | \
+    grep -P '^gen3-' | \
+    while read -r acct; do
+      unset clusters
+      regions=(us-east-1 us-east-2 us-west-1 us-west-2)
+      for r in "${regions[@]}"; do
+        ac "$acct" "$r"
+        clusters="$(aws eks list-clusters --query "not_null(clusters[])" --output text)"
+        if [[ -n "$clusters" ]]; then
+          echo "$acct: $r"
+          echo -e "\t$clusters"
+        fi
+      done
+    done
+}
+
+update_cluster_kubeconfigs()
+{
+  awsctx | \
+    grep -P '^gen3-' | \
+    while read -r acct; do
+      regions=(us-east-1 us-east-2 us-west-1 us-west-2)
+      for r in "${regions[@]}"; do
+        echo "$acct $r"
+        ac "$acct" "$r"
+        for cluster in $(aws eks list-clusters --query "not_null(clusters[])" --output text); do
+          aws eks update-kubeconfig --name "$cluster"
+        done
+      done
+    done
 }
 
 alias mmid=maas_machine_id
@@ -223,10 +246,48 @@ alias grm='g co master && g fetch --all && g reset --hard upstream/master && g r
 alias hd='helm del --purge'
 
 # remove comments in front of these if skopos is ever decomissioned.
-alias k='kubectl'
+k-check()
+{
+  # function to alias kubectl
+  cmd="$*"
+  current_context=$(kubectl config current-context)
+
+  if ! echo "$current_context" | grep -q "$AWS_PROD_USER"; then
+    return 0
+  fi
+
+  if echo "$cmd" | grep -Pq '\s*apply'; then
+    echo "$(tput setaf 7)$(tput setab 1)THIS IS PROD!! Press ctrl+c to abort! $(tput sgr0)"
+    read -r _
+    kubectl "$cmd"
+  fi
+}
+
+alias k='k-check'
 alias kg='kubectl get -o wide'
 alias kga='kubectl get -o wide --all-namespaces'
 alias kgj='kubectl get -o json'
+alias kgns="kubectl config view --minify -o 'jsonpath={..namespace}'"
+# get pod events
+kgpe()
+{
+  kubectl get events -o wide --field-selector involvedObject.name="$1"
+}
+# get pod by phase
+kgps()
+{
+  kubectl get pods -o wide --field-selector status.phase="$1"
+}
+kgpc()
+{
+  kg po "$1" -o jsonpath='{.status.conditions[*].message}'
+}
+
+proj()
+{
+  cd "$HOME"/projects/src/"$*" || return
+}
+
 alias kd='kubectl describe'
 alias gb='get_git_branch'
 
@@ -244,9 +305,10 @@ alias preview="fzf --preview 'bat --color \"always\" {}'"
 alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
 
 # bat - cat with wings
-alias less="$(get_bat --color=auto --theme=TwoDark)"
-alias cat="$(get_bat --color=auto --theme=TwoDark)"
+alias less='$HOME/bin/dbat'
+alias cat='$HOME/bin/dbat'
 
+[[ -n "$COOKIES" ]] && alias curl='curl -b $COOKIES -c $COOKIES'
 # add support for ctrl+o to open selected file in VS Code
 export FZF_DEFAULT_OPTS="--bind='ctrl-o:execute(code {})+abort'"
 

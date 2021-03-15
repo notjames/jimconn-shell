@@ -9,34 +9,25 @@
 #umask 022
 HISTTIMEFORMAT="%c: "
 
-# The next line updates PATH for the Google Cloud SDK.
-if [ -f '/var/tmp/google-cloud-sdk/path.bash.inc' ]
-then
-  source '/var/tmp/google-cloud-sdk/path.bash.inc'
-
-# The next line enables shell command completion for gcloud.
-  if [ -f '/var/tmp/google-cloud-sdk/completion.bash.inc' ]
-  then
-    source '/var/tmp/google-cloud-sdk/completion.bash.inc'
-  fi
-fi
-
 [[ -d /opt/terraform ]] && PATH=$PATH:/opt/terraform
+[[ -d /usr/local/kubebuilder/bin ]] && PATH=$PATH:/usr/local/kubebuilder/bin
+
 GOROOT=/usr/lib/go
-GOPATH=$HOME/go #:$HOME/projects
+GOPATH=$HOME/go
+#GOPATH=$HOME/go:$HOME/projects
 PATH=$PATH:$HOME/go/bin:$HOME/.local/bin:/usr/local/go/bin:/usr/local/bin
 
 # set PATH so it includes user's private bin if it exists
 if [ -d "$HOME/bin" ] ; then
-    PATH="$HOME/bin:$PATH"
+  PATH="$HOME/bin:$PATH"
 fi
 
 # if running bash
 if [ -n "$BASH_VERSION" ]; then
-    # include .bashrc if it exists
-    if [ -f "$HOME/.bashrc" ]; then
-  . "$HOME/.bashrc"
-    fi
+  # include .bashrc if it exists
+  if [ -f "$HOME/.bashrc" ]; then
+    source "$HOME/.bashrc"
+  fi
 fi
 
 [[ -x /usr/bin/vim ]] && EDITOR=/usr/bin/vim
@@ -46,9 +37,25 @@ PERL5LIB="$HOME/.local/lib/perl/site"
 
 # initialize keychain
 # requires ssh-agent and keychain be installed.
-eval "$(keychain --systemd --eval "$HOME"/.ssh/*.pem "$HOME"/.ssh/*-id_rsa "$HOME"/.ssh/google_compute_engine)"
+eval "$(keychain --systemd --eval "$HOME"/.ssh/*.pem "$HOME"/.ssh/*-id_rsa)"
 
 export LS_COLORS PERL5LIB EDITOR GOPATH GOROOT
 
 # OPAM configuration
-. /home/jimconn/.opam/opam-init/init.sh > /dev/null 2> /dev/null || true
+source /home/jimconn/.opam/opam-init/init.sh > /dev/null 2> /dev/null || true
+
+export PATH="$HOME/.cargo/bin:$PATH"
+
+[[ -f $HOME/.cargo/env ]] && source $HOME/.cargo/env
+export $("$HOME"/bin/set-aws --profile gen3-dev --in us-west-2 --override)
+
+# enable completions in ~/.bash_profile
+. <(flux completion bash)
+
+CURL_HOME=$HOME/.config/curl
+COOKIES=$CURL_HOME/cookies
+mkdir -p "$CURL_HOME"
+export CURL_HOME COOKIES
+
+# temporary
+#export SOPS_KMS_ARN=arn:aws:kms:us-west-2:429863676324:key/4b2c5901-43aa-4e1c-b14d-bb797a476939
