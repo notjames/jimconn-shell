@@ -7,13 +7,12 @@ require 'amazing_print'
 require 'recursive-open-struct'
 
 TOML_FILE = File.join(ENV['HOME'],'.config','starship.toml')
-INI_FILE  = File.join(ENV['HOME'],'.aws','config')
 KUBE_CFG  = File.join(ENV['HOME'],'.kube','config')
 
 SUB_ACCT_ENV_MAP  = {
-                      'xxxxxxxxxxx': 'development',
-                      'xxxxxxxxxx1': 'preprod',
-                      'xxxxxxxxxx2': 'production',
+                      '429863676324': 'development',
+                      '184966437322': 'preprod',
+                      '308171672556': 'production',
                     }
 
 # read contexts from ~/.kube/config
@@ -87,35 +86,6 @@ class Arns
   end
 end
 
-class Ini
-  def map_accounts
-    mapped_accounts = {}
-    @ini_in.map \
-    {|k, role|
-      key = k.gsub(/^profile /,'')
-      parsed = super.to_h(role['role_arn'])
-      mapped_accounts[key] = parsed.keys.first
-    }
-    mapped_accounts
-  end
-end
-
-class Parser
-  attr_accessor :role_map, :arns_hash
-  attr_reader :toml_in, :raw_ini_in, :ini_in, :ini_in_mapped, :toml_in_parsed,
-              :toml_out, :mapped_accounts
-
-  def initialize
-    parse
-  end
-
-  def parse
-    @ini_in         = read_ini
-    @ini_in_mapped  = map_accounts
-    @toml_in_parsed = read_toml
-  end
-end
-
 kube_contexts = Configs.new.read_kubeconfig
 toml_contexts = Configs.new.read_toml
 
@@ -127,4 +97,8 @@ kube_contexts.each \
 }
 
 
-File.write(TOML_FILE, TomlRB.dump(toml_contexts), mode: 'w')
+if ARGV[0] == '--dry-run' or ARGV[0] == '-n'
+  puts TomlRB.dump(toml_contexts)
+else
+  File.write(TOML_FILE, TomlRB.dump(toml_contexts), mode: 'w')
+end
