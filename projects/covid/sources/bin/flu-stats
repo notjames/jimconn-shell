@@ -1,4 +1,26 @@
 #!/usr/bin/env ruby
+# Author: Jim Conner <snafuxnj (at) notyippee but the other one .com>
+#
+# Copyright 2020-2021 Jim Conner
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the Software
+# is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+# WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+# **********************************************************************************
 #
 # https://dev.socrata.com/
 # https://www.opendatanetwork.com/
@@ -18,7 +40,7 @@ require 'pry'
 
 class Super
   class << self
-    attr_accessor :data, :client, :now, :source_title, :source_api_id
+    attr_accessor :data, :client, :now, :source_title, :source_api_id, :response
   end
 end
 
@@ -153,7 +175,7 @@ end
 #  https://dev.socrata.com/foundry/data.cdc.gov/hc4f-j6nb
 #  r8kw-7aab # provisional Covid-19 death counts by week ending date and state
 class Covid
-  attr_reader :data, :client, :now, :source_title, :source_api_id
+  attr_reader :data, :client, :now, :source_title, :source_api_id, :response
 
   def initialize(c)
     @now    = Time.now.strftime('%Y-%m-%dT00:00:00.000')
@@ -161,10 +183,9 @@ class Covid
   end
 
   def s1
-    response     = {}
     data         = {}
     api_id       = 'r8kw-7aab'
-    response     = @client.get(api_id, :state => 'United States')
+    @response    = @client.get(api_id, :state => 'United States')
     period       = '%s-%s' % [response.body.first['start_week'], @now]
 
     data[period] = {}
@@ -188,10 +209,9 @@ class Covid
   end
 
   def s2
-    response     = {}
     data         = {}
     api_id       = 'uggs-hy5q'
-    response     = @client.get(api_id, :state => 'United States')
+    @response    = @client.get(api_id, :state => 'United States')
     period       = '%s-%s' % [response.body.first['start_week'], @now]
 
     data[period] = {}
@@ -215,16 +235,15 @@ class Covid
   end
 
   def s3
-    response     = {}
     data         = {}
     api_id       = 'hc4f-j6nb'
-    response     = @client.get(api_id, :state => 'United States')
+    @response    = @client.get(api_id, :state => 'United States')
     period       = '%s-%s' % [response.body.first['start_week'], @now]
 
     data[period] = {}
     base         = data[period]
 
-    response.body.each \
+    @response.body.each \
     {|obj|
       unless base.has_key? :covid_deaths
         base[:covid_deaths]     = 0
@@ -259,14 +278,27 @@ class S4 < Covid
   end
 
   # https://dev.socrata.com/foundry/data.cdc.gov/9bhg-hcku
-  def s4
-    data     = response = base = {}
-    api_id   = '9bhg-hcku'
-    response = @client.get(api_id, :state => 'United States')
-    period   = '%s-%s' % [response.body.first['start_week'], @now]
-    base     = {:totals => {}, :detail => {}}
+  #                        "data_as_of" => "2020-12-30T00:00:00.000",
+  #                        "start_week" => "2020-02-01T00:00:00.000",
+  #                          "end_week" => "2020-12-26T00:00:00.000",
+  #                             "state" => "United States",
+  #                               "sex" => "Unknown",
+  #                     "age_group_new" => "75-84 years",
+  #                   "covid_19_deaths" => "2",
+  #                      "total_deaths" => "18",
+  #                  "pneumonia_deaths" => "3",
+  #     "pneumonia_and_covid_19_deaths" => "2",
+  #                  "influenza_deaths" => "0",
+  #      "pneumonia_influenza_or_covid" => "3"
 
-    response.body.each \
+  def s4
+    data      = base = {}
+    api_id    = '9bhg-hcku'
+    @response = @client.get(api_id, :state => 'United States')
+    period    = '%s-%s' % [@response.body.first['start_week'], @now]
+    base      = {:totals => {}, :detail => {}}
+
+    @response.body.each \
     {|obj|
       unless base[:totals].has_key? :covid_deaths
         base[:totals][:covid_deaths]     = 0
@@ -277,25 +309,25 @@ class S4 < Covid
         base[:detail][obj[:sex]] = {}
       end
 
-      unless base[:detail][obj[:sex]].has_key? obj[:age_group]
-        base[:detail][obj[:sex]][obj[:age_group]] = {}
+      unless base[:detail][obj[:sex]].has_key? obj[:age_group_new]
+        base[:detail][obj[:sex]][obj[:age_group_new]] = {}
       end
 
-      unless base[:detail][obj[:sex]][obj[:age_group]].has_key? :covid19
-        base[:detail][obj[:sex]][obj[:age_group]][:covid19] = 0
+      unless base[:detail][obj[:sex]][obj[:age_group_new]].has_key? :covid19
+        base[:detail][obj[:sex]][obj[:age_group_new]][:covid19] = 0
       end
 
-      unless base[:detail][obj[:sex]][obj[:age_group]].has_key? :influenza
-        base[:detail][obj[:sex]][obj[:age_group]][:influenza] = 0
+      unless base[:detail][obj[:sex]][obj[:age_group_new]].has_key? :influenza
+        base[:detail][obj[:sex]][obj[:age_group_new]][:influenza] = 0
       end
 
-      if obj['sex'] == 'All' and obj['age_group'] == 'All Ages'
-        base[:totals][:covid_deaths]                        += obj['covid_19_deaths'].to_i
-        base[:totals][:influenza_deaths]                    += obj['influenza_deaths'].to_i
+      if obj['sex'] == 'All' and obj['age_group_new'] == 'All Ages'
+        base[:totals][:covid_deaths]     += obj['covid_19_deaths'].to_i
+        base[:totals][:influenza_deaths] += obj['influenza_deaths'].to_i
       end
 
-      base[:detail][obj[:sex]][obj[:age_group]][:covid19]   += obj[:covid_19_deaths].to_i
-      base[:detail][obj[:sex]][obj[:age_group]][:influenza] += obj[:influenza_deaths].to_i
+      base[:detail][obj[:sex]][obj[:age_group_new]][:covid19]   += obj[:covid_19_deaths].to_i
+      base[:detail][obj[:sex]][obj[:age_group_new]][:influenza] += obj[:influenza_deaths].to_i
     }
 
     @source_api_id = api_id
