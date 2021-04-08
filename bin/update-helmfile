@@ -1,0 +1,36 @@
+#!/bin/bash
+
+set -eo pipefail
+version=$1
+local_dest='/usr/local/bin'
+
+[[ -z "$version" ]] && \
+  {
+    echo >&2 'Specify desired version'
+    exit 1
+  }
+
+check_remote()
+{
+  curl -IskL -o /dev/null https://github.com/roboll/helmfile/releases/download/"$version"/helmfile_linux_amd64 -w  '%{http_code}'
+}
+
+if [[ -n "$version" ]]; then
+  ver=${version/^v//}
+  version="v$ver"
+fi
+
+if [[ -e "$local_dest"/helmfile-"$ver" ]]; then
+  ln -sf "$local_dest"/helmfile-"$ver" "$local_dest"/helmfile
+else
+  if [[ $(check_remote) == 200 ]]; then
+    curl -# -kL -o- https://github.com/roboll/helmfile/releases/download/"$version"/helmfile_linux_amd64 > "$local_dest"/helmfile-"$ver"
+    ln -sf "$local_dest"/helmfile-"$ver" "$local_dest"/helmfile && \
+    chmod 755 "$local_dest"/helmfile-"$ver"
+  else
+    echo >&2 'Remote side suggest requested file does not exist'
+    exit 1
+  fi
+fi
+
+helmfile -v
