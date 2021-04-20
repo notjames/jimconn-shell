@@ -1,0 +1,17 @@
+---
+bases:
+  - ../../common/environments.yaml
+  - ../../common/repos.yaml
+  - ../../common/helmdefaults.yaml
+
+---
+releases:
+  - name: vault-secrets-webhook
+    namespace: {{ .Values.vaultsecretswebhook.namespace }}
+    createNamespace: true
+    labels:
+      app: vault-secrets-webhook
+    chart: banzaicloud-stable/vault-secrets-webhook
+    version: {{ .Values.vaultsecretswebhook.version }}
+    values:
+      - values.yaml

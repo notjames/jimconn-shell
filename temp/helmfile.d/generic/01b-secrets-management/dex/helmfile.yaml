@@ -1,0 +1,17 @@
+---
+bases:
+  - ../../common/environments.yaml
+  - ../../common/repos.yaml
+  - ../../common/helmdefaults.yaml
+
+---
+releases:
+  - name: dex
+    namespace: {{ .Values.dex.namespace }}
+    createNamespace: true
+    labels:
+      app: dex
+    chart: stable/dex
+    version: {{ .Values.dex.version }}
+    values:
+      - values.yaml.gotmpl

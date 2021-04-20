@@ -1,0 +1,9 @@
+environments:
+  default: {}
+
+---
+helmfiles:
+  - path: "../../../../helmfile.d/"
+    values:
+      - config.yaml
+

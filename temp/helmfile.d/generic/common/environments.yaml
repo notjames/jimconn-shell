@@ -1,0 +1,10 @@
+---
+environments:
+  default:
+    values:
+      - ../../common/versions.yaml
+      - ../../common/values.yaml.gotmpl
+  production:
+    values:
+      - ../../common/versions.yaml
+      - ../../common/values.yaml.gotmpl
