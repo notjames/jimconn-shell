@@ -1,0 +1,44 @@
+semver: 0.0.1
+name: somename
+
+# Versions here reflect the chart version, NOT the app version.
+ambassador:
+  version: 6.6.2
+  namespace: ambassador
+
+certmanager:
+  version: 1.0.4
+  namespace: certmanager
+
+blscauxclusterissuer:
+  version: 0.1.0
+  namespace: certmanager
+
+externaldns:
+  version: v20210203-v0.7.6-28-g44288212-arm64v8
+  namespace: externaldns
+
+nginxingress:
+  version: 3.15.2
+  namespace: ingress-nginx
+
+postgres:
+  version: x.x.x
+  namespace: grafana
+
+oauth2proxy:
+  version: 3.2.5
+  namespace: auth-system
+
+dex:
+  version: 2.15.2
+  namespace: dex
+
+vaultoperator:
+  version: 1.8.1
+  namespace: vault
+
+vaultsecretswebhook:
+  version: 1.8.2
+  namespace: secrets-webhook
+

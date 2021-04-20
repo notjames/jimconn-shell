@@ -1,0 +1,26 @@
+---
+bases:
+  - ../../common/environments.yaml
+  - ../../common/repos.yaml
+  - ../../common/helmdefaults.yaml
+
+---
+releases:
+  - name: oauth2-proxy
+    namespace: {{ .Values.oauth2proxy.namespace }}
+    createNamespace: true
+    labels:
+      app: oauth2-proxy
+    chart: stable/oauth2-proxy
+    version: {{ .Values.oauth2proxy.version }}
+    values:
+      - {{- if .Values.arm64_support }} arm64-values.yaml.gotmpl {{- else }} values.yaml.gotmpl {{- end }}
+    hooks:
+      - events: ["presync"]
+        command: "bash"
+        showlogs: true
+        args: ["-x", "create-ns", "{{`{{ .Values.oauth2proxy.namespace }}`}}"]
+      - events: ["presync"]
+        command: "bash"
+        showlogs: true
+        args: ["-x", "generate-secret-cookie", "{{ `{{ .Values.oauth2proxy.namespace }}` }}"]
