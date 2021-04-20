@@ -2,4 +2,4 @@ helmfiles:
   - "*/helmfile.yaml"
   - path: "*/helmfile.yaml"
     selectors:
-      - tier="network-and-proxies"
+      - "tier=network-and-proxies"
