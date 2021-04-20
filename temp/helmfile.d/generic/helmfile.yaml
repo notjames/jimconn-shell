@@ -1,2 +1,5 @@
 helmfiles:
   - "*/*.yaml"
+  - path: "*/*.yaml"
+    values:
+      - {{ .Values | toYaml | nindent 8 }}

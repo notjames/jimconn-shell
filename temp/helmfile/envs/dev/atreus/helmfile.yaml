@@ -1,5 +1,5 @@
-environments:
-  default: {}
+---
+{{ readFile "../../../../helmfile.d/generic/common/environments.yaml.gotmpl" | toYaml }}
 
 ---
 helmfiles:
