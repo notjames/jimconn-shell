@@ -1,0 +1,5 @@
+---
+aws_nlb_with_tls_termination_at_lb: false
+arm64_support: false
+domain_name: "atreus.dev.bluescape.io"
+cluster_id: "atreus"
