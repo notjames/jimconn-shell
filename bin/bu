@@ -1,7 +1,11 @@
 #!/bin/bash
+# Author: Jim Conner
+# Not well written but it works.
 
+# How to run: bu --to backup-1/  --dry-run
 RSYNC_OPTS="--progress=info2,all3 -avvp --stats --exclude-from=$HOME/save/ignorelist.txt"
 TO_VOLUME=""
+DRY_RUN=0
 
 usage()
 {
@@ -19,9 +23,9 @@ usage()
 
 standby_vms()
 {
-  for vm in ${VMs[@]};do 
+  for vm in "${VMs[@]}";do
     for s in $(VBoxManage showvminfo "$vm" --machinereadable | grep 'VMState='); do
-      s=$(echo $s | tr -d '"')
+      s=$(echo "$s" | tr -d '"')
       IFS='=' read -r k v <<<"$s"
 
       echo >&2 -n "Checking state of VM: $vm..."
@@ -29,7 +33,7 @@ standby_vms()
       if [[ "$k" == "VMState" ]]  && [[ "$v" == "running" ]]; then
         echo >&2 "$v: Attempting pause during backup..."
 
-        if ! /usr/local/bin/vboxmanage controlvm $vm savestate; then
+        if ! /usr/local/bin/vboxmanage controlvm "$vm" savestate; then
           echo >&2 "Unable to savestate of vm $vm: exit code: $?"
           return 1
         fi
@@ -44,62 +48,74 @@ standby_vms()
 
 wake_up_vms()
 {
-  for vm in ${paused[@]};do 
-    if ! /usr/local/bin/vboxmanage startvm $vm --type headless; then
+  for vm in "${paused[@]}";do
+    if ! /usr/local/bin/vboxmanage startvm "$vm" --type headless; then
       echo >&2 "Unable to restart (headless mode) vm: $vm: exit code: $?"
     fi
   done
 }
 
+abort()
+{
+  msg="$*"
+  echo >&2 "$msg"
+  exit 1
+}
+
 macbackup ()
 {
-    local mounted log dts
-    dts=$(date --iso-8601=seconds)
-    mounted="$TO_VOLUME"
-    dst_base="$mounted/samsung/mac/"
-    src_base=($HOME/ /var/tmp/)
+    local mounted log p
+    mounted="${TO_VOLUME%*/*/*}"
+    #dst_base="$mounted/$(uname -s | tr '[:upper:]' '[:lower:]')/"
+    src_base=("$HOME"/ /var/tmp/)
     rsync_cmd="rsync $RSYNC_OPTS"
     log="/var/tmp/backup-$dts.log";
 
     if ! /sbin/mount | ggrep -Pq '^.* '"$mounted"''; then
-        echo >&2 'Backup volume is not mounted. Halting'
-        return 1;
+      echo >&2 'Backup volume is not mounted. Halting'
+      return 1;
     fi;
 
     if /usr/sbin/diskutil list "$mounted" > /dev/null 2>&1; then
-      if test -d "$mounted/samsung/mac/home/"; then
-        echo "COMMAND USED: $rsync_cmd $HOME/ $dst_base/home/ @$dts" > "$log" 2>&1
-        $rsync_cmd $HOME/ $dst_base/home/ | tee "$log" 2>&1
-        $rsync_cmd /var/tmp/ $dst_base/var/tmp/ | tee "$log" 2>&1
-      else
-        echo >&2;'Dest path does not exist. Halting'
-        return 1;
-      fi;
+      for dst in "${src_base[@]}"; do
+        p=''
+
+        if [[ "$dst" == "$HOME/" ]]; then
+          p="/home/"
+        fi
+
+        echo "COMMAND USED: $rsync_cmd $dst $TO_VOLUME$p" > "$log" 2>&1
+        $rsync_cmd "$dst" "$TO_VOLUME$p" | tee "$log" 2>&1
+      done
     else
       echo >&2 'No mounted volume found...'
     fi
 }
 
-while [[ "$@" ]]; do
+while [[ "$*" ]]; do
   case "$1" in
     --to|-t)
       shift
+      TO_VOLUME="/Volumes/$1/$(uname -s | tr '[:upper:]' '[:lower:]')"
+
       if test -z "$1"; then
-        echo >&2 "--to requires an argument"
+        abort "--to requires an argument"
         exit 1
       fi
 
-      mkdir -p "/Volumes/$1/samsung/mac/home/" 2>/dev/null
-      mkdir -p "/Volumes/$1/samsung/mac/var/tmp" 2>/dev/null
-
-      if ! test -d "/Volumes/$1"; then
-        echo >&2 "The volume: '/Volumes/$1' does not exist. Sorry."
-        exit 1
+      if [[ "$1" =~ ^/?Volumes/ ]]; then
+        abort "Do not specify the Volumes prefix for backup. Just specify"\
+              "the part after /Volumes/"
       fi
 
-      TO_VOLUME="/Volumes/$1"
+      mkdir -p "$TO_VOLUME" 2>/dev/null
+
+      if ! test -d "$TO_VOLUME"; then
+        abort "The volume: '$TO_VOLUME' does not exist. Sorry."
+      fi
     ;;
     --dry-run|-n)
+      DRY_RUN=1
       RSYNC_OPTS="--dry-run $RSYNC_OPTS"
     ;;
     --help|-h)
@@ -113,25 +129,45 @@ while [[ "$@" ]]; do
   shift
 done
 
-VMs=($(VBoxManage list vms | awk -F '"' '{print $2}'))
-paused=()
-
 if [[ "$TO_VOLUME" == "" ]]; then
-  echo >&2 '--to argument is required.'
-  exit 1
+  abort '--to argument is required.'
 fi
 
-if standby_vms; then
-  echo >&2 "paused is: ${paused[@]}"
+case $(uname -s) in
+  Linux)
+    dts=$(date --iso-8601=seconds)
+  ;;
+  Darwin)
+    dts=$(date +%Y-%m-%dT%H:%M:%S%z)
+  ;;
+esac
+
+read -ra VMs <<< "$(VBoxManage list vms | awk -F '"' '{print $2}')"
+paused=()
+
+if [[ $DRY_RUN == 0 ]]; then
+  if standby_vms; then
+    # shellcheck disable=SC2068
+    echo >&2 "paused is: $(echo ${paused[@]} | tr ' ' ', ')"
+    macbackup
+  fi
+
+  if [[ ${#paused[@]} -gt 0 ]]; then
+    wake_up_vms
+
+  #  echo >&2 'The following VMs will need to be brought back up manually: '
+    for pvm in "${paused[@]}"; do
+      echo >&2 "$pvm"
+    done
+  fi
+else
   macbackup
 fi
 
-if [[ ${#paused[@]} -gt 0 ]]; then
-  wake_up_vms
-
-#  echo >&2 'The following VMs will need to be brought back up manually: '
-  for pvm in ${paused[@]}; do
-    echo >&2 "$pvm"
-  done
+TO_VOLUME="backup-2"
+read -rp 'Make sure backup-2 is mounted and press enter to start rsync or ctrl+c to abort...'
+cd /Volumes || exit 1
+if ! /usr/sbin/diskutil list "$mounted" > /dev/null 2>&1; then
+  abort "Looks like backup-2 is not mounted."
 fi
-
+rsync --progress=info2,all3 -avvp --stats --dry-run backup-1/* backup-2/
