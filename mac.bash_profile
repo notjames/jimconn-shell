@@ -40,7 +40,7 @@ PATH=$PATH:$HOME/go/bin:$HOME/Library/Python/2.7/bin:$HOME/bin:/usr/local/sbin
     export EDITOR
   }
 
-#HOMEBREW_GITHUB_API_TOKEN=0c6a635c6a09ce1a11946798ee13e631cee9ec
+#HOMEBREW_GITHUB_API_TOKEN=
 
 #PS1='\h:\W \u\$ '
 PS1="\[$txtgrn\]\t\[$txtred\]-\[$txtblu\]\u\[$txtylw\]\[$txtylw\]\w\[\033[m\]\[$txtgrn\]\$(__git_ps1)\[$txtrst\]\$ "
