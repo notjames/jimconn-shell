@@ -120,6 +120,28 @@ fix_vbox_if()
   sudo perl -n -e -i"$ext" 's/^(\d{1,3}\.)+\d{1,3}(\s+vmlinux.*)/'"$VB_ADDR"' $2/; print' "$hosts"
 }
 
+mkcdir()
+{
+  if ! mkdir -p "$1"; then
+    echo >&2 "exit code: $?"
+  fi
+  cd "$1"
+}
+
+proj()
+{
+  cd "$HOME"/projects/src/"$*" || return
+}
+
+kctx()
+{
+  if test -z "$1"; then
+    kubectx
+    return 0
+  fi
+  kubectx "$(kubectx | grep $1)"
+}
+
 VMNAME="Ubuntu"
 VB_ADDR=$(vboxmanage guestproperty enumerate "$VMNAME"  | \
           ggrep -Po 'V4/IP, value: (\d{1,3}\.)+\d{1,3}' | \
