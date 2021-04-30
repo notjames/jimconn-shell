@@ -1,7 +1,8 @@
 " Specify a directory for plugins
 " - For Neovim: ~/.local/share/nvim/plugged
 " - Avoid using standard Vim directory names like 'plugin'
-call plug#begin('~/.vim/plugged')
+" call plug#begin('~/.vim/plugged')
+call plug#begin(stdpath('data') . '/plugged')
 
 " Make sure you use single quotes
 
@@ -12,7 +13,11 @@ Plug 'junegunn/vim-easy-align'
 Plug 'https://github.com/junegunn/vim-github-dashboard.git'
 
 " Multiple Plug commands can be written in a single line using | separators
-Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets'
+"Plug 'SirVer/ultisnips'
+"Plug 'honza/vim-snippets'
+
+" vim-markdown
+Plug 'gabrielelena/vim-markdown'
 
 " On-demand loading
 Plug 'scrooloose/nerdtree', { 'on':  'NERDTreeToggle' }
@@ -26,7 +31,7 @@ Plug 'fatih/vim-go', { 'tag': '*' }
 Plug 'fatih/molokai'
 
 " Plugin options
-Plug 'nsf/gocode', { 'tag': 'v.20150303', 'rtp': 'vim' }
+Plug 'nsf/gocode', { 'tag': 'v.20170907', 'rtp': 'vim' }
 
 " Plugin outside ~/.vim/plugged with post-update hook
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
@@ -59,9 +64,15 @@ Plug 'morhetz/gruvbox'
 " github.com/vim-airline/vim-airline-themes
 Plug 'vim-airline/vim-airline-themes'
 
+" neomake
+Plug 'neomake/neomake'
+
 " Initialize plugin system
 call plug#end()
 set timeoutlen=1000 ttimeoutlen=10
+
+" When reading a buffer (after 1s), and when writing (no delay).
+" call neomake#configure#automake('rw', 1000)
 
 execute pathogen#infect()
 
@@ -96,7 +107,7 @@ let g:syntastic_auto_loc_list = 0
 let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
 let g:syntastic_loc_list_height=3
-let b:syntastic_sh_shellcheck_args = "--exclude SC2016,SC1090"
+let b:syntastic_sh_shellcheck_args = "-x --exclude SC2016,SC1090"
 
 " use goimports for formatting
 let g:go_fmt_command = "goimports"
@@ -121,9 +132,6 @@ nnoremap <C-e> :Errors<CR>
 nnoremap <C-u> :lclose<CR>
 nnoremap <C-y> :lnext<CR>
 nnoremap <C-w> :lprevious<CR>
-
-"autocmd BufNewFile,BufRead *.go setlocal et ts=4 sw=4
-set sts=4 ts=8 sw=2 ai nu ruler si sta sm hls et
 
 "highlight search term=bold,italic ctermfg=black ctermbg=blue
 highlight Search term=bold,italic cterm=bold,italic ctermfg=white ctermbg=blue guifg=white guibg=blue
@@ -194,3 +202,11 @@ augroup Binary
   au BufWritePost *.bin if &bin | %!xxd
   au BufWritePost *.bin set nomod | endif
 augroup END
+
+" https://www.gregjs.com/vim/2015/linting-code-with-neomake-and-neovim/
+" autocmd! BufWritePost,BufEnter * neomake
+
+"autocmd BufNewFile,BufRead *.go setlocal et ts=4 sw=4
+set sts=4 ts=8 sw=2 ai nu ruler si sta sm hls et
+:nnoremap <C-s> <C-w>
+set mouse=a
