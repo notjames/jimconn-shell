@@ -2,9 +2,9 @@
 
 which=$(command -v which)
 # real prod
-AWS_PROD_USER=xxxxxxxxxxxx
+AWS_PROD_USER=
 # test prod
-#AWS_PROD_USER=xxxxxxxxxxxx
+#AWS_PROD_USER=
 
 get_git_branch()
 {
@@ -269,8 +269,16 @@ update_cluster_kubeconfigs()
     kubectx "$SAVE_CONTEXT"
 }
 
-alias mmid=maas_machine_id
-alias mmai=maas-all-custom-images
+mkcdir()
+{
+  if ! mkdir -p "$1"; then
+    echo >&2 "exit code: $?"
+  fi
+  cd "$1"
+}
+
+#alias mmid=maas_machine_id
+#alias mmai=maas-all-custom-images
 
 # some more ls aliases
 alias ll='ls -alF'
@@ -361,6 +369,15 @@ proj()
   cd "$HOME"/projects/src/"$*" || return
 }
 
+kctx()
+{
+  if test -z "$1"; then
+    kubectx
+    return 0
+  fi
+  kubectx "$(kubectx | grep $1)"
+}
+
 alias k='k-check'
 alias kg='\kubectl get -o wide'
 alias kga='\kubectl get -o wide --all-namespaces'
@@ -368,6 +385,7 @@ alias kgj='\kubectl get -o json'
 alias kgd='\kubectl describe'
 alias kgns='\kubectl config view --minify -o "jsonpath={..namespace}"'
 alias kubectl='k-warning'
+alias kve='\kubectl get secret vault-unseal-keys -n vault -o jsonpath="{.data.vault-root}"| base64 -d'
 
 alias gb='get_git_branch'
 
@@ -387,6 +405,11 @@ alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
 # bat - cat with wings
 #alias less='$HOME/bin/dbat'
 #alias cat='$HOME/bin/dbat'
+if which bat >/dev/null 2>&1; then
+  bat_opts='--color=auto --theme=TwoDark'
+  alias less="$(which bat) $bat_opts"
+  alias cat="$(which bat) $bat_opts"
+fi
 
 [[ -n "$COOKIES" ]] && alias curl='curl -b $COOKIES -c $COOKIES'
 # add support for ctrl+o to open selected file in VS Code
