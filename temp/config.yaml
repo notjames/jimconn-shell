@@ -1,7 +1,0 @@
-helm:
-  kubeContext: default
-  verify: false
-  wait: true
-  timeout: 600
-  recreatePods: false
-  force: false

@@ -1,6 +1,0 @@
----
-helmfiles:
-  - "generic/*"
-  - path: "generic/*"
-    values:
-      - {{ .Values | toYaml | nindent 8 }}

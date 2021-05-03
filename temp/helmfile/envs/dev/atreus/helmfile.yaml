@@ -1,9 +1,0 @@
----
-{{ readFile "../../../../helmfile.d/generic/common/environments.yaml.gotmpl" | toYaml }}
-
----
-helmfiles:
-  - path: "../../../../helmfile.d/"
-    values:
-      - config.yaml
-

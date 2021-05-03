@@ -1,7 +1,0 @@
-helmfiles:
-  - "*/helmfile.yaml"
-  - path: "*/helmfile.yaml"
-    values:
-      - {{ .Values | toYaml | nindent 8 }}
-    selectors:
-      - "tier=secrets-managment"
