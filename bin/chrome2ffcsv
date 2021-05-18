@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+
+require 'csv'
+require 'amazing_print'
+
+file    = ARGV[0] or abort 'Please specify a chrome exported passwords csv to read.'
+out     = 'ff-password-from-chrome.csv'
+runtime = Time.now.strftime('%FT%T')
+header  = ['url','username','password','httpRealm','formActionOrigin',
+           'guid','timeCreated','timeLastUsed','timePasswordChanged']
+
+# firefox format: "url","username","password","httpRealm","formActionOrigin",
+#                 "guid","timeCreated","timeLastUsed","timePasswordChanged"
+# chrome format: "name","url","username","password"
+CSV.open(out, 'w') do |csvout|
+  CSV.read(file).each_with_index do |csv, idx|
+    if idx == 0
+      csvout << header
+      next
+    end
+
+    name, url, username, password = csv
+    csvout << [url, username, password, nil, name, nil, runtime, runtime, nil]
+  end
+end
