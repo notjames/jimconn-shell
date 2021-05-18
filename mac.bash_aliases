@@ -260,15 +260,24 @@ proj()
   cd "$HOME"/projects/src/"$*" || return
 }
 
-kctx()
+kctx ()
 {
-  if test -z "$1"; then
-    kubectx
-    return 0
-  fi
-  kubectx "$(kubectx | grep $1)"
+    if test -z "$1"; then
+        kubectx;
+        return 0;
+    fi;
+    if [[ "$1" != "-" ]] && test -n "$2"; then
+        kubectx "$(kubectx | grep "$1")";
+        kubens "$2";
+        return 0;
+    fi;
+    if [[ "$1" == - ]] && test -z "$2"; then
+        kubectx "$1";
+        return 0;
+    fi;
+    kubectx "$(kubectx | grep "$1")";
+    [[ -n "$2" ]] && kubens "$2"
 }
-
 
 
 # real prod
