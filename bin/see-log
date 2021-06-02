@@ -1,0 +1,33 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'amazing_print'
+
+logfile = ARGV[0]
+
+File.read(logfile).split(/\n/).each \
+{|line|
+  puts '---------------'
+  jq = JSON.parse line
+
+  jq.each_pair \
+  {|k,v|
+    if k =~ /err|result|route|src/
+      begin
+        puts '%s: ' % [k]
+        puts JSON.pretty_generate(v)
+      rescue
+        puts '%s: ' % [k]
+        puts v
+      end
+    else
+      if k == 'msg'
+        puts '%-12s:' % [k]
+        puts v
+      else
+        puts '%-12s: %s' % [k,v]
+      end
+    end
+  }
+  puts '---------------'
+}
