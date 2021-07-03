@@ -1,34 +1,10 @@
 #!/bin/bash
 
 which=$(command -v which)
-
 # real prod
 AWS_PROD_USER=
-# test prod user
+# test prod
 #AWS_PROD_USER=
-#gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-f
-#alias gcloud='gcloud project=jimtest-170020'
-#alias gcloud='gcloud --project=k8s-work'
-
-get_git_branch()
-{
-  git rev-parse --abbrev-ref HEAD | grep -v HEAD || \
-  git describe --exact-match HEAD 2>/dev/null    || \
-  git rev-parse HEAD
-}
-
-repo_clone()
-{
-  local ghub repo_name client_repo upstream_repo account
-  account="$1"
-
-  ghub="https://github.com/"
-  repo_name="${1:?Must provide repo name}"
-  client_repo="${ghub}notjames/$repo_name"
-  upstream_repo="${ghub}$account/$repo_name"
-
-  git clone "$client_repo" && cd "$repo_name" && git remote add upstream "$upstream_repo"
-}
 
 fix_fsp()
 {
@@ -42,10 +18,10 @@ fix_fsp()
 #   suffix="${f#*.}"
     new_f="$(echo "$f" | tr ' ' '_' | \
              sed -r    \
-                  -e "s/[,']|[()]|[[]]//g"      \
-                  -e "s/\&#([a-zA-Z0-9]+;|-)//g"\
-                  -e 's/[^a-zA-Z0-9]//'         \
-                  -e 's/-+|([_\.]?-_)/-/g')"
+                 -e "s/[,']|[()]|[[]]//g"      \
+                 -e "s/\&#([a-zA-Z0-9]+;|-)//g"\
+                 -e 's/[^a-zA-Z0-9]//'         \
+                 -e 's/-+|([_\.]?-_)/-/g')"
 
     mv "$f" "$new_f"
   done < <(find . -maxdepth 1 -type f -name '[&a-zA-Z0-9]*.*')
@@ -139,8 +115,14 @@ when()
 ## blsc env
 ac()
 {
+  profile="$1"
+  region="$2"
+
+  [[ -z "$1" ]] &&  profile="gen3-dev"
+  [[ -z "$2" ]] &&  region="us-west-2"
+
   # shellcheck disable=SC2046
-  export $(awsctx --profile "$1" --region "$2")
+  export $(awsctx --profile "$profile" --region "$region")
 }
 
 show_clusters()
@@ -254,15 +236,78 @@ mkcdir()
   cd "$1"
 }
 
+# some more ls aliases
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+
+# Add an "alert" alias for long running commands.  Use like so:
+#   sleep 10; alert
+alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
+
+# enable color support of ls and also add handy aliases
+if [ -x /usr/bin/dircolors ]; then
+   (test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)") || eval "$(dircolors -b)"
+    alias ls='ls --color=auto'
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+fi
+
+[ -x "$($which git)" ] && alias g='git'
+
+alias tmux='tmux -2'
+
+#gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-f
+#alias gcloud='gcloud project=jimtest-170020'
+#alias gcloud='gcloud --project=k8s-work'
+
+alias vi='vi -p'
+alias hd='helm del --purge'
+alias grm='g co master && g fetch --all && g reset --hard upstream/master && g rebase upstream/master && g push'
+
+__get_exports()
+{
+  set -eo pipefail
+  aws sts get-session-token --serial-number  arn:aws:iam::594888345760:mfa/jim.conner --token-code "$1" | \
+      jq -Mr '.Credentials | @sh "AWS_ACCESS_KEY_ID=\(.AccessKeyId)
+                                  AWS_SECRET_ACCESS_KEY=\(.SecretAccessKey)
+                                  AWS_SESSION_TOKEN=\(.SessionToken)"' | \
+      tr -d "'"
+}
+
+# blsc MFA
+# ac bluescape-admin
+awsmfa()
+{
+  [[ -z "$1" ]] && \
+    {
+      echo >&2 '''
+      Remember, this is for the bluescape-admin profile!
+      Need your MFA token...
+      '''
+      return 1
+    }
+
+  # shellcheck disable=SC2046
+  if ! exports=$(__get_exports "$1"); then
+    echo >&2 "Unable to export MFA credentials. Error from aws/jq/tr was $?"
+    return $?
+  fi
+
+  export $exports
+}
+
 # remove comments in front of these if skopos is ever decomissioned.
 k-check()
 {
   # function to alias kubectl
   cmd="$*"
   current_context=$(\kubectl config current-context)
+  grepre='\s*(apply|delete|edit|patch|replace|drain|cordon|rollout|scale|expose|uncordon|taint|drain) '
 
   if echo "$current_context" | grep -q "$AWS_PROD_USER" && \
-     echo "$cmd" | grep -Pq '\s*(apply|delete|edit|patch|replace|drain|cordon|rollout|scale|expose|uncordon|taint|drain) '; then
+     echo "$cmd" | grep -Pq "$grepre"; then
     echo -n "$(tput setaf 7)$(tput setab 1)WARNING: THIS IS PROD!! Press ctrl+c to abort! $(tput sgr0)"
     read -r _
   fi
@@ -288,9 +333,28 @@ kgps()
   \kubectl get pods -o wide --field-selector status.phase="$1"
 }
 
+# get pod condition
 kgpc()
 {
   \kubectl get -o wide po "$1" -o jsonpath='{.status.conditions[*].message}'
+}
+
+# get all pods on specific node
+kgpbynode()
+{
+  \kubectl get -A pods --field-selector spec.nodeName="$1"
+}
+
+# Running, Pending, Succeed, Failed, Unknown
+kgpbynodeandphase()
+{
+  \kubectl get -A pods --field-selector spec.nodeName="$1" \
+    --field-selector status.phase="$2"
+}
+
+kgnodecap()
+{
+  \kubectl get node "$1" -ojsonpath='{.status.capacity.pods}{"\n"}'
 }
 
 proj()
@@ -298,72 +362,46 @@ proj()
   cd "$HOME"/projects/src/"$*" || return
 }
 
-kctx ()
+kctx()
 {
-    if test -z "$1"; then
-        kubectx;
-        return 0;
-    fi;
-    if [[ "$1" != "-" ]] && test -n "$2"; then
-        kubectx "$(kubectx | grep "$1")";
-        kubens "$2";
-        return 0;
-    fi;
-    if [[ "$1" == - ]] && test -z "$2"; then
-        kubectx "$1";
-        return 0;
-    fi;
-    kubectx "$(kubectx | grep "$1")";
-    [[ -n "$2" ]] && kubens "$2"
+  if test -z "$1"; then
+      kubectx;
+      return 0;
+  fi;
+  if [[ "$1" != "-" ]] && test -n "$2"; then
+      kubectx "$(kubectx | grep "$1" | tr -d '[:cntrl:]' | sed 's/\[[0-9;]*m//g')";
+      kubens "$2";
+      return 0;
+  fi;
+  if [[ "$1" == - ]] && test -z "$2"; then
+      kubectx "$1";
+      return 0;
+  fi;
+  kubectx "$(kubectx | grep "$1" | tr -d '[:cntrl:]' | sed 's/\[[0-9;]*m//g')";
+  [[ -n "$2" ]] && kubens "$2"
 }
 
-# enable color support of ls and also add handy aliases
-if [ -x /usr/bin/dircolors ]; then
- (test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)") || eval "$(dircolors -b)"
-  alias ls='ls --color=auto'
-  #alias dir='dir --color=auto'
-  #alias vdir='vdir --color=auto'
-
-  alias grep='grep --color=auto'
-  alias fgrep='fgrep --color=auto'
-  alias egrep='egrep --color=auto'
-fi
-
-[ -x "$($which git)" ] && alias g='git'
-
-# some more ls aliases
-alias ll='ls -alF'
-alias la='ls -A'
-alias l='ls -CF'
-
-# Add an "alert" alias for long running commands.  Use like so:
-#   sleep 10; alert
-alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
-
-alias tmux='tmux -2'
-
-alias vi='vi -p'
-alias hd='helm del --purge'
-alias grm='g co master && g fetch --all && g reset --hard upstream/master && g rebase upstream/master && g push'
+k8sscrub()
+{
+  yq -Mr -Y 'del(.status,.metadata["managedFields","resourceVersion","selfLink","uid","creationTimestamp"])' | \
+    yq -Mr -Y 'del(.metadata.annotations."kubectl.kubernetes.io/last-applied-configuration")'
+}
 
 alias k='k-check'
 alias kg='\kubectl get -o wide'
-alias kga='\kubectl get -o wide --all-namespaces'
+alias kgl='\kubectl get -o wide --show-labels'
+alias kga='\kubectl get -o wide --all-namespaces --show-labels'
 alias kgj='\kubectl get -o json'
-alias kgd='\kubectl describe'
+alias kdesc='\kubectl describe'
 alias kgns='\kubectl config view --minify -o "jsonpath={..namespace}"'
 alias kubectl='k-warning'
 alias kve='\kubectl get secret vault-unseal-keys -n vault -o jsonpath="{.data.vault-root}"| base64 -d'
 
 alias gb='get_git_branch'
-
 alias whatsmyip='curl -sL http://api.myip.com | jq -Mr .ip'
 alias preview="fzf --preview 'bat --color \"always\" {}'"
 alias du='ncdu --color dark -rr -x --exclude .git --exclude node_modules'
 
-# bat - cat with wings
-#alias less='$HOME/bin/dbat'
-#alias cat='$HOME/bin/dbat'
 if which bat >/dev/null 2>&1; then
   bat_opts='--color=auto --theme=TwoDark'
   alias less="$(which bat) $bat_opts"
@@ -373,3 +411,8 @@ fi
 [[ -n "$COOKIES" ]] && alias curl='curl -b $COOKIES -c $COOKIES'
 # add support for ctrl+o to open selected file in VS Code
 export FZF_DEFAULT_OPTS="--bind='ctrl-o:execute(code {})+abort'"
+
+## autocompletions
+source <(\kubectl completion bash)
+complete -F __start_kubectl k
+complete -D _kubectl_get kg
